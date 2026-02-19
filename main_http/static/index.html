@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="es" class="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RefLens | Aura Graph Engine</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+        body { 
+            font-family: 'Plus Jakarta Sans', sans-serif; 
+            background: #0f172a; /* Slate 900 */
+        }
+        /* Efecto de fondo Aurora */
+        .aurora {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle at 0% 0%, rgba(79, 70, 229, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
+            z-index: -1;
+        }
+        .glass-card { 
+            background: rgba(30, 41, 59, 0.7); 
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .agent-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .7; transform: scale(0.95); } }
+        #cy { border-radius: 1rem; }
+        .tab-active { background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+    </style>
+</head>
+<body class="text-slate-200 overflow-hidden">
+    <div class="aurora"></div>
+
+    <div class="flex h-screen w-full p-4 gap-4">
+        <aside class="w-80 flex flex-col gap-4">
+            <div class="glass-card rounded-3xl p-6 flex flex-col h-full">
+                <div class="flex items-center gap-3 mb-10">
+                    <div class="h-11 w-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                        <i data-lucide="sparkles" class="text-white w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-white tracking-tight">RefLens</h1>
+                        <span class="text-[10px] font-black text-indigo-400 tracking-[0.2em] uppercase">Intelligence</span>
+                    </div>
+                </div>
+
+                <div class="space-y-8 flex-1">
+                    <div class="space-y-4">
+                        <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Parámetros de Agente</label>
+                        <div class="p-4 rounded-2xl bg-slate-800/40 border border-white/5 space-y-3">
+                            <div class="flex justify-between text-xs font-semibold">
+                                <span class="text-slate-400">Contexto (top_k)</span>
+                                <span id="topk-val" class="text-indigo-400">5</span>
+                            </div>
+                            <input id="topk" type="range" min="1" max="30" value="5" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                        </div>
+                        <button class="w-full flex items-center justify-between p-4 rounded-2xl bg-slate-800/40 border border-white/5 hover:bg-slate-800/60 transition-all">
+                            <span class="text-xs font-semibold">Modo Debug</span>
+                            <input id="debug" type="checkbox" checked class="w-4 h-4 rounded accent-indigo-500" />
+                        </button>
+                    </div>
+                </div>
+
+                <div class="pt-6 border-t border-white/5">
+                    <div class="flex items-center gap-3 p-3 rounded-2xl bg-emerald-500/5 border border-emerald-500/10">
+                        <div id="status-dot" class="h-2 w-2 rounded-full bg-emerald-500"></div>
+                        <span id="status-text" class="text-[10px] font-bold text-emerald-500 uppercase">Sistema Activo</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="flex-1 flex flex-col gap-4">
+            <div class="glass-card h-16 rounded-2xl px-6 flex items-center justify-between">
+                <nav class="flex gap-2">
+                    <button class="tab-btn tab-active px-4 py-1.5 rounded-xl text-xs font-bold transition-all" data-tab="final">Respuesta</button>
+                    <button class="tab-btn px-4 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all" data-tab="draft">Borrador</button>
+                    <button class="tab-btn px-4 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all" data-tab="qa">Estructura</button>
+                </nav>
+                <div id="meta" class="text-[10px] font-mono text-slate-500 bg-slate-800/50 px-3 py-1 rounded-full"></div>
+            </div>
+
+            <div class="glass-card flex-1 rounded-3xl overflow-hidden flex flex-col">
+                <div id="out-container" class="flex-1 overflow-y-auto p-8">
+                    <div id="badge-container" class="mb-4"></div>
+                    <div id="out" class="text-slate-300 leading-relaxed text-sm whitespace-pre-wrap max-w-2xl mx-auto">
+                        <div class="flex flex-col items-center justify-center py-20 text-slate-500 opacity-50">
+                            <i data-lucide="command" class="w-12 h-12 mb-4"></i>
+                            <p class="text-sm italic">Escribe una pregunta para analizar el libro...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-6 border-t border-white/5 bg-slate-900/30">
+                    <div class="max-w-2xl mx-auto relative group">
+                        <textarea id="query" rows="1" class="w-full bg-slate-800/50 border border-white/10 rounded-2xl py-4 pl-4 pr-32 text-sm text-white placeholder:text-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all resize-none" placeholder="¿Cuál es el conflicto principal en el capítulo 3?"></textarea>
+                        <div class="absolute right-2 top-2 bottom-2 flex gap-2">
+                            <button id="clear" class="p-2 text-slate-500 hover:text-white transition-colors"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
+                            <button id="ask" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition-all active:scale-95">
+                                <span>ASK</span>
+                                <i data-lucide="send" class="w-3 h-3"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <aside class="w-96 flex flex-col gap-4">
+            <div class="glass-card flex-1 rounded-3xl p-6 flex flex-col overflow-hidden">
+                <div class="flex items-center justify-between mb-4">
+                    <h3 class="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                        <i data-lucide="network" class="w-4 h-4 text-indigo-400"></i> Mapa de Contexto
+                    </h3>
+                    <button onclick="resetZoom()" class="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded">Fit</button>
+                </div>
+                
+                <div id="cy" class="w-full h-64 bg-slate-900/50 mb-6"></div>
+
+                <div class="flex-1 overflow-y-auto space-y-3">
+                    <h3 class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Nodos Extraídos</h3>
+                    <div id="chunks" class="space-y-3 text-[11px]"></div>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <script>
+        const $ = (id) => document.getElementById(id);
+        let lastData = null;
+        let activeTab = "final";
+        let cy = null;
+
+        // Inicializar iconos
+        lucide.createIcons();
+
+        // Actualizar UI del slider
+        $("topk").oninput = (e) => $("topk-val").textContent = e.target.value;
+
+        // --- MOTOR DE GRAFO PROTEGIDO ---
+        function initGraph(chunks) {
+            try {
+                // Si no hay fragmentos o no es un array, salimos
+                if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
+                    console.warn("No hay chunks para el grafo");
+                    return;
+                }
+
+                const nodes = chunks.map((c, i) => ({
+                    data: { 
+                        id: `n${i}`, 
+                        label: `Nodo ${i + 1}` 
+                    }
+                }));
+
+                const edges = [];
+                for (let i = 0; i < nodes.length - 1; i++) {
+                    edges.push({
+                        data: { 
+                            source: `n${i}`, 
+                            target: `n${i+1}` 
+                        }
+                    });
+                }
+
+                // Destruir instancia previa si existe para evitar errores de memoria
+                if (cy) { cy.destroy(); }
+
+                cy = cytoscape({
+                    container: $('cy'),
+                    elements: { nodes, edges },
+                    style: [
+                        { 
+                            selector: 'node', 
+                            style: { 
+                                'background-color': '#818cf8', 
+                                'label': 'data(label)', 
+                                'color': '#94a3b8', 
+                                'font-size': '10px', 
+                                'width': 12, 
+                                'height': 12,
+                                'text-margin-y': 8
+                            } 
+                        },
+                        { 
+                            selector: 'edge', 
+                            style: { 
+                                'width': 1, 
+                                'line-color': '#334155', 
+                                'curve-style': 'bezier', 
+                                'target-arrow-shape': 'triangle', 
+                                'target-arrow-color': '#334155',
+                                'opacity': 0.6
+                            } 
+                        }
+                    ],
+                    layout: { name: 'cose', padding: 30, animate: true }
+                });
+            } catch (err) {
+                console.error("Error en Cytoscape:", err);
+            }
+        }
+
+        function resetZoom() { if(cy) cy.fit(); }
+
+        // --- RENDERIZADO PROTEGIDO ---
+        function render() {
+            if (!lastData) return;
+            const out = $("out");
+            
+            try {
+                // 1. Renderizar Badge
+                const v = lastData.verdict || 'unknown';
+                const color = v === 'pass' ? 'emerald' : 'amber';
+                $("badge-container").innerHTML = `
+                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-${color}-500/10 border border-${color}-500/20 text-[10px] font-bold text-${color}-400 uppercase">
+                        <i data-lucide="shield-check" class="w-3 h-3"></i> Agent QA: ${v}
+                    </div>`;
+
+                // 2. Renderizar Respuesta Principal
+                if (activeTab === "final") out.textContent = lastData.final_answer || "Sin respuesta final.";
+                else if (activeTab === "draft") out.textContent = lastData.draft_answer || "Sin borrador.";
+                else out.innerHTML = `<pre class="p-4 bg-slate-900 rounded-2xl text-xs text-indigo-300 overflow-x-auto">${JSON.stringify(lastData.qa_json || {}, null, 2)}</pre>`;
+
+                // 3. Renderizar Chunks en el lateral
+                const chunkArr = lastData.chunks || [];
+                $("chunks").innerHTML = chunkArr.map((c, i) => `
+                    <div class="p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-indigo-500/30 transition-all group">
+                        <div class="flex justify-between text-[9px] font-bold text-slate-500 mb-1 uppercase">
+                            <span>ID: ${c.id ? c.id.slice(0,5) : i}</span>
+                            <span class="text-indigo-400">SCORE: ${typeof c.score === 'number' ? c.score.toFixed(2) : 'N/A'}</span>
+                        </div>
+                        <p class="text-slate-400 leading-normal line-clamp-2 group-hover:line-clamp-none transition-all">${c.text || 'Sin contenido'}</p>
+                    </div>
+                `).join("");
+
+                // 4. Intentar inicializar el Grafo
+                initGraph(chunkArr);
+                
+                // Refrescar iconos
+                lucide.createIcons();
+
+            } catch (err) {
+                console.error("Error en render():", err);
+                $("status-text").textContent = "ERROR DE RENDERIZADO";
+                $("status-text").classList.replace("text-emerald-500", "text-rose-500");
+            }
+        }
+
+        async function ask() {
+            const query = $("query").value.trim();
+            if(!query) return;
+
+            // Bloquear botón y mostrar estado
+            $("ask").disabled = true;
+            const dot = $("status-dot");
+            const text = $("status-text");
+            
+            dot.className = "h-2 w-2 rounded-full bg-indigo-500 agent-pulse";
+            text.textContent = "AGENTE PENSANDO...";
+            text.className = "text-[10px] font-bold text-indigo-400 uppercase";
+            
+            try {
+                const res = await fetch("/api/ask", {
+                    method: "POST",
+                    headers: {"Content-Type":"application/json"},
+                    body: JSON.stringify({ 
+                        query, 
+                        top_k: parseInt($("topk").value), 
+                        show_debug: $("debug").checked 
+                    })
+                });
+
+                if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+
+                lastData = await res.json();
+                
+                // Renderizamos
+                render();
+
+                // Si llegamos aquí, todo ha ido bien
+                text.textContent = "SISTEMA ACTIVO";
+                text.className = "text-[10px] font-bold text-emerald-500 uppercase";
+                dot.className = "h-2 w-2 rounded-full bg-emerald-500";
+
+            } catch (e) {
+                console.error("Error en la petición:", e);
+                text.textContent = "ERROR DE AGENTE";
+                text.className = "text-[10px] font-bold text-rose-500 uppercase";
+                dot.className = "h-2 w-2 rounded-full bg-rose-500";
+            } finally {
+                $("ask").disabled = false;
+            }
+        }
+
+        // --- EVENTOS ---
+        $("ask").onclick = ask;
+        
+        document.querySelectorAll(".tab-btn").forEach(btn => {
+            btn.onclick = () => {
+                document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("tab-active"));
+                btn.classList.add("tab-active");
+                activeTab = btn.dataset.tab;
+                render();
+            }
+        });
+
+        // Soporte para Ctrl+Enter
+        $("query").addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") ask();
+        });
+    </script>
+</body>
+</html>
