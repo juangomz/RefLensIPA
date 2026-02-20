@@ -4,10 +4,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 import chromadb
+from chromadb.config import Settings
 from pydantic import BaseModel, Field
 
-from src.reflens.tool import Tool
-from src.reflens.graph.neo4j_client import Neo4jClient
+from reflens.tool import Tool
+from reflens.graph.neo4j_client import Neo4jClient
 
 
 # -------- Chroma tool --------
@@ -20,16 +21,25 @@ class VectorSearchParams(BaseModel):
         description="Optional Chroma metadata filter (where clause)",
     )
 
-def make_chroma_search_tool(persist_dir: str, collection_name: str = "kb_chunks") -> Tool:
-    persist_path = str(Path(persist_dir))
+from rag.models.embedding_model import EmbeddingModel
 
-    client = chromadb.PersistentClient(path=persist_path)
+def make_chroma_search_tool(persist_dir: str, embedding_model: EmbeddingModel, collection_name: str = "kb_chunks") -> Tool:
+    persist_path = str(Path(persist_dir))
+    client = chromadb.PersistentClient(
+        path=persist_path,
+        settings=Settings(anonymized_telemetry=False),
+    )
     collection = client.get_or_create_collection(collection_name)
 
     def _search(args: dict[str, Any]) -> dict[str, Any]:
         p = VectorSearchParams(**args)
+
+        q_emb = embedding_model.embed_batch([p.query], batch_size=1)[0]
+        if hasattr(q_emb, "tolist"):
+            q_emb = q_emb.tolist()
+
         res = collection.query(
-            query_texts=[p.query],
+            query_embeddings=[q_emb],   # <- clave
             n_results=p.k,
             where=p.where,
             include=["documents", "metadatas", "distances"],
@@ -51,6 +61,8 @@ def make_chroma_search_tool(persist_dir: str, collection_name: str = "kb_chunks"
                 "distance": dists[i],
                 "meta": meta,
             })
+            
+        print("[CHROMA] query=", p.query, "k=", p.k, "returned=", len(out), flush=True)
 
         return {"results": out, "k": p.k}
 
@@ -73,6 +85,10 @@ def make_neo4j_query_tool(neo4j: Neo4jClient) -> Tool:
         p = GraphQueryParams(**args)
         rows = neo4j.run(p.cypher, p.params)
         return {"rows": rows}
+    
+    def graph_query(cypher: str, params: dict):
+        print("[NEO4J]", cypher, params)
+        return neo4j.query(cypher, params)
 
     return Tool(
         name="graph_query",

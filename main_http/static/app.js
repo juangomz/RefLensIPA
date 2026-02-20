@@ -3,6 +3,7 @@ const lucide_refresh = () => lucide.createIcons();
 
 let lastData = null;
 let activeTab = "final";
+let cy = null; // <--- ESTA LÍNEA ES IMPRESCINDIBLE
 
 // Actualizar label de top_k
 $("topk").oninput = (e) => $("topk-val").textContent = e.target.value;
@@ -56,10 +57,14 @@ function render() {
     renderBadge(lastData.verdict);
     $("meta").textContent = `LATENCIA: ${lastData.latency_ms}ms | NODOS: ${lastData.chunks?.length || 0}`;
 
-    // Selección de Tab
-    if (activeTab === "final") out.textContent = lastData.final_answer || "";
-    else if (activeTab === "draft") out.textContent = lastData.draft_answer || "";
-    else out.innerHTML = `<pre class="p-4 bg-black rounded-lg text-indigo-300 text-xs overflow-x-auto">${JSON.stringify(lastData.qa_json, null, 2)}</pre>`;
+    // Selección de Tab con Soporte Markdown (Marked.js)
+    if (activeTab === "final") {
+        out.innerHTML = marked.parse(lastData.final_answer || "");
+    } else if (activeTab === "draft") {
+        out.innerHTML = marked.parse(lastData.draft_answer || "");
+    } else {
+        out.innerHTML = `<pre class="p-4 bg-black rounded-lg text-indigo-300 text-xs overflow-x-auto">${JSON.stringify(lastData.qa_json, null, 2)}</pre>`;
+    }
 
     // Render de Chunks mejorado
     $("chunks").innerHTML = (lastData.chunks || []).map((c, i) => `
@@ -72,9 +77,14 @@ function render() {
             <p class="text-[11px] text-zinc-500 leading-relaxed line-clamp-4 group-hover:line-clamp-none transition-all">${escapeHtml(c.text)}</p>
         </div>
     `).join("");
+
+    // Actualizar el Grafo
+    initGraph(lastData.chunks);
+    lucide_refresh();
 }
 
 function escapeHtml(s) {
+    if (!s) return "";
     return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
 
@@ -108,6 +118,62 @@ async function handleAsk() {
     }
 }
 
+function initGraph(chunks) {
+    const container = $("cy");
+    if (!container) return;
+
+    try {
+        const validChunks = (chunks || []).filter(c => c.text && c.text !== "Sin contenido");
+        
+        const nodes = validChunks.map((c, i) => ({
+            data: { id: `n${i}`, label: `Nodo ${i + 1}` }
+        }));
+
+        const edges = [];
+        for (let i = 0; i < nodes.length - 1; i++) {
+            edges.push({ data: { source: `n${i}`, target: `n${i+1}` } });
+        }
+
+        if (cy) cy.destroy();
+
+        cy = cytoscape({
+            container: container,
+            elements: { nodes, edges },
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'background-color': '#6366f1',
+                        'label': 'data(label)',
+                        'color': '#94a3b8',
+                        'font-size': '10px',
+                        'width': 12,
+                        'height': 12,
+                        'text-margin-y': 8,
+                        'text-valign': 'bottom'
+                    }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'width': 1,
+                        'line-color': '#334155',
+                        'target-arrow-shape': 'triangle',
+                        'target-arrow-color': '#334155',
+                        'curve-style': 'bezier',
+                        'opacity': 0.5
+                    }
+                }
+            ],
+            layout: { name: 'cose', padding: 30, animate: true }
+        });
+    } catch (e) {
+        console.error("Error en Grafo:", e);
+    }
+}
+
+window.resetZoom = () => { if(cy) cy.fit(); };
+
 // Event Listeners
 document.querySelectorAll(".tab-btn").forEach(btn => {
     btn.onclick = () => {
@@ -119,9 +185,14 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 });
 
 $("ask").onclick = handleAsk;
-$("clear").onclick = () => { lastData = null; render(); setStatus("ready", "Sesión limpia"); $("query").value = ""; };
+$("clear").onclick = () => { 
+    lastData = null; 
+    render(); 
+    setStatus("ready", "Sesión limpia"); 
+    $("query").value = ""; 
+    if (cy) cy.destroy();
+};
 
-// Shortcut: Cmd/Ctrl + Enter para enviar
 $("query").onkeydown = (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") handleAsk();
 };

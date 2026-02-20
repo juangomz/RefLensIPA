@@ -58,7 +58,7 @@ class Settings(BaseSettings):
         ..., description="ChromaDB persistence directory"
     )
     chroma_collection_name: str = Field(
-        "recursive", description="ChromaDB collection name"
+        "kb_chunks", description="ChromaDB collection name"
     )
 
     # Retrieval Configuration

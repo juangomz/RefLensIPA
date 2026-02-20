@@ -159,6 +159,7 @@ class RecursiveChunker(Chunker):
             List of chunks
         """
         chunks = self._split_text(text)
+        doc_id = metadata.get("doc_id")
 
         result = []
         for i, chunk_text in enumerate(chunks):
@@ -171,12 +172,15 @@ class RecursiveChunker(Chunker):
                 }
 
                 result.append(
-                    Chunk(
-                        text=chunk_text,
-                        metadata=chunk_metadata,
-                        chunk_index=i,
-                    )
+                Chunk(
+                    doc_id=doc_id,
+                    chunk_id=f"c_{i}", # Unique within doc_id
+                    text=chunk_text,
+                    source=metadata.get("source"),
+                    timestamp=datetime.now().isoformat()
                 )
+            )
+            
 
         return result
 
@@ -409,5 +413,3 @@ class SemanticChunker(Chunker):
         sentences = [sent.strip() for sent in sentences if sent.strip()]
 
         return sentences
-    
-
