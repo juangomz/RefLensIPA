@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from lab4_agents.graph.schemas import Chunk
+from reflens.graph.schemas import Chunk
 
 
 def load_chunks_json(path: str | Path) -> list[Chunk]:

@@ -1,29 +1,38 @@
 [project]
-name = "reflens"
+name = "final-project-ipa"
 version = "0.1.0"
-description = "A minimal, educational AI agents framework demonstrating tool integration and agentic workflows with async support and Langfuse observability"
+description = "RefLens + RAG educational project (agents, Neo4j graph, Chroma vector store)"
 readme = "README.md"
-authors = [
-    { name = "FBarrca", email = "FBarrca@users.noreply.github.com" }
-]
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.129.0",
-    "fire>=0.7.1",
-    "ipykernel>=7.1.0",
-    "langfuse>=2.0.0",
-    "neo4j>=6.1.0",
-    "openai>=2.15.0",
-    "pydantic>=2.12.5",
-    "python-dotenv>=1.2.1",
-    "rich>=14.3.2",
-    "tenacity>=9.1.2",
-    "uvicorn>=0.41.0",
+  "bs4>=0.0.2",
+  "chromadb>=1.5.0",
+  "ebooklib>=0.20",
+  "fastapi>=0.129.0",
+  "fire>=0.7.1",
+  "ipykernel>=7.1.0",
+  "langfuse>=2.0.0",
+  "neo4j>=6.1.0",
+  "openai>=2.15.0",
+  "pydantic>=2.12.5",
+  "pydantic-settings>=2.2.1",
+  "python-dotenv>=1.2.1",
+  "rich>=14.3.2",
+  "tenacity>=9.1.2",
+  "uvicorn>=0.41.0",
 ]
 
 [project.scripts]
-reflens = "reflens.cli:main"
+# opcional: si tienes main() en esos módulos
+# rag-ingest = "rag.cli.ingest:main"
 
 [build-system]
-requires = ["uv_build>=0.9.3,<0.10.0"]
-build-backend = "uv_build"
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["rag*", "reflens*"]

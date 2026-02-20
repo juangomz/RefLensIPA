@@ -62,3 +62,11 @@ class Neo4jClient:
         with self.driver.session(database=self.config.database) as session:
             for q in queries:
                 session.run(q)
+            
+    from typing import Any, Optional
+
+    def run(self, cypher: str, params: Optional[dict[str, Any]] = None) -> list[dict[str, Any]]:
+            """Run a Cypher query and return records as dicts."""
+            with self.driver.session(database=self.config.database) as session:
+                result = session.run(cypher, params or {})
+                return [record.data() for record in result]

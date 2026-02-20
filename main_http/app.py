@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from openai import OpenAI
 
 # Importa tus agentes (ajusta el path según dónde los tengas)
-from src.reflens.answer_agent import AnswerAgent
+from src.reflens.answer.answer_agent import AnswerAgent
 from src.reflens.qa_agent import QAAgent
 
 import json
@@ -102,7 +102,7 @@ def ask(req: AskRequest):
 
     # Por ahora: retrieval desde chunks.json (luego lo cambias por vuestro retriever real)
     repo_root = os.path.abspath(os.path.join(BASE_DIR, ".."))
-    chunks_path = os.path.join(repo_root, "chunks.json")
+    chunks_path = os.path.join(repo_root, "data/processed/chunks.json")
     retrieved = load_some_chunks(chunks_path, req.top_k)
 
     # Answer -> QA

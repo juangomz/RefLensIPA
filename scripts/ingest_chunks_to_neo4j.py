@@ -5,11 +5,11 @@ from pathlib import Path
 
 import fire
 
-from lab4_agents.graph.chunks_loader import load_chunks_json
-from lab4_agents.graph.extractor import extract_graph
-from lab4_agents.graph.normalizer import normalize_graph
-from lab4_agents.graph.neo4j_client import Neo4jClient
-from lab4_agents.graph.writer import GraphWriter
+from reflens.graph.chunks_loader import load_chunks_json
+from reflens.graph.extractor import extract_graph
+from reflens.graph.normalizer import normalize_graph
+from reflens.graph.neo4j_client import Neo4jClient
+from reflens.graph.writer import GraphWriter
 
 
 def ingest(chunks_path: str, limit: int | None = None, skip: int = 0):

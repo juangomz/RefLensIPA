@@ -10,6 +10,7 @@ chunk = Chunk(
     text="RefLens requires a RAG pipeline and uses Neo4j as graph database.",
     source="test.pdf",
     timestamp="2026-02-18",
+    embedding=[0.1, -0.2, 0.3, 0.4]  # ejemplo
 )
 
 extracted = extract_graph(chunk)
@@ -20,6 +21,7 @@ neo4j.create_constraints()
 
 writer = GraphWriter(neo4j)
 metrics = writer.write(normalized)
-
+res = neo4j.run("MATCH (n) RETURN count(n) AS total")
+print(res)  # [{'total': ...}]
 print(metrics)
 neo4j.close()

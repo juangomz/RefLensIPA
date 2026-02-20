@@ -7,7 +7,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from pydantic import ValidationError
 
 from dotenv import load_dotenv
-from src.reflens.graph.schemas import Chunk, ExtractedGraph, EntityType, RelationType
+from reflens.graph.schemas import Chunk, ExtractedGraph, EntityType, RelationType
 import os
 from openai import OpenAI
 

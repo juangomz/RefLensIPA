@@ -4,7 +4,7 @@ import hashlib
 import unicodedata
 from typing import Dict, Tuple
 
-from src.reflens.graph.schemas import (
+from reflens.graph.schemas import (
     Chunk,
     ExtractedGraph,
     NormalizedEntity,

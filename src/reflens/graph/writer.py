@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from lab4_agents.graph.schemas import NormalizedGraph
-from lab4_agents.graph.neo4j_client import Neo4jClient
+from reflens.graph.schemas import NormalizedGraph
+from reflens.graph.neo4j_client import Neo4jClient
 
 
 def _now_ms() -> int:
@@ -33,6 +33,7 @@ class GraphWriter:
                 SET c.text = $text,
                     c.source = $source,
                     c.timestamp = $timestamp,
+                    c.embedding = $embedding,
                     c.updated_at = $updated_at
                 """,
                 doc_id=chunk["doc_id"],
@@ -40,6 +41,7 @@ class GraphWriter:
                 text=chunk["text"],
                 source=chunk["source"],
                 timestamp=chunk["timestamp"],
+                embedding=chunk.get("embedding"),  # <---
                 updated_at=_now_ms(),
             )
 

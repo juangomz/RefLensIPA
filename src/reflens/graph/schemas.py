@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional
 
 
 # ---------- Input (from ingestion pipeline) ----------
@@ -15,6 +16,7 @@ class Chunk(BaseModel):
     text: str = Field(..., description="Chunk text content")
     source: str = Field(..., description="Source filename or URL")
     timestamp: str = Field(..., description="ISO date or datetime string when chunk was produced")
+    embedding: Optional[List[float]] = None
 
 
 # ---------- Graph extraction output (LLM) ----------
