@@ -62,10 +62,10 @@ col = client.get_or_create_collection(name=name)
 count = col.count()
 print("Count in", name, "=", count)
 
-qa = QueryAgent(settings=settings.chroma_persist_directory)
+query = QueryAgent(settings=settings.chroma_persist_directory)
 
 print("\n--- VECTOR SEARCH ---")
-vector_tool = qa.tools["vector_search"]
+vector_tool = query.tools["vector_search"]
 v = vector_tool.execute({
     "query": "Napoleón",
     "k": 5,
@@ -74,7 +74,7 @@ v = vector_tool.execute({
 print(v)
 
 print("\n--- GRAPH QUERY ---")
-graph_tool = qa.tools["graph_query"]
+graph_tool = query.tools["graph_query"]
 g = graph_tool.execute({
     "cypher": """
         MATCH (e:Entity)

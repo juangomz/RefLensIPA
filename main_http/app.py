@@ -13,7 +13,7 @@ from src.rag.config import settings
 # Importa tus agentes (ajusta el path según dónde los tengas)
 from src.reflens.answer.answer_agent import AnswerAgent
 from src.reflens.query.query_agent import QueryAgent, QUERY_AGENT_SYSTEM
-from src.reflens.qa_agent import QAAgent
+from src.reflens.eval_agent import EvalAgent
 
 import json
 
@@ -202,7 +202,7 @@ class AskResponse(BaseModel):
     latency_ms: int
     draft_answer: str
     final_answer: str
-    qa_json: Dict[str, Any]
+    eval_json: Dict[str, Any]
     chunks: List[Dict[str, Any]]
 
 
@@ -215,7 +215,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Create agents once
 answer_agent = AnswerAgent(llm_call)
-qa_agent = QAAgent(llm_call)
+eval_agent = EvalAgent(llm_call)
 query_agent = QueryAgent(
     chroma_persist_dir=os.getenv("CHROMA_PERSIST_DIRECTORY", "chroma_db"),
     chroma_collection=os.getenv("CHROMA_COLLECTION", "kb_chunks"),
@@ -258,23 +258,23 @@ def ask(req: AskRequest):
     # Generar borrador con AnswerAgent
     draft = answer_agent.run(req.query, retrieved, tools_trace={"tool_results": out.get("tool_results") if isinstance(out, dict) else []}).draft_answer
 
-    # Pasar por QA
-    qa_out = qa_agent.review(
+    # Pasar por eval
+    eval_out = eval_agent.review(
         user_query=req.query,
         draft_answer=draft,
         retrieved_context=retrieved,
-        tools_trace={"tool_results": out.get("tool_results") if isinstance(out, dict) else [], "pipeline": "query->answer->qa"},
+        tools_trace={"tool_results": out.get("tool_results") if isinstance(out, dict) else [], "pipeline": "query->answer->eval"},
     )
 
     t1 = time.time()
 
     return {
         "query": req.query,
-        "verdict": qa_out.verdict,
+        "verdict": eval_out.verdict,
         "latency_ms": int((t1 - t0) * 1000),
         "draft_answer": draft,
-        "final_answer": qa_out.answer,
-        "qa_json": qa_out.qa_json if req.show_debug else {},
+        "final_answer": eval_out.answer,
+        "eval_json": eval_out.eval_json if req.show_debug else {},
         "chunks": retrieved if req.show_debug else [],
     }
     
@@ -300,32 +300,3 @@ def test_tools(q: str = "Napoleón"):
     })
 
     return {"vector": v, "graph": g}
-# @app.post("/api/ask", response_model=AskResponse)
-# def ask(req: AskRequest):
-#     t0 = time.time()
-
-#     # Por ahora: retrieval desde chunks.json (luego lo cambias por vuestro retriever real)
-#     repo_root = os.path.abspath(os.path.join(BASE_DIR, ".."))
-#     chunks_path = os.path.join(repo_root, "data/processed/chunks.json")
-#     retrieved = load_some_chunks(chunks_path, req.top_k)
-
-#     # Answer -> QA
-#     draft = answer_agent.run(req.query, retrieved, tools_trace={"k": req.top_k}).draft_answer
-#     qa_out = query_agent.review(
-#         user_query=req.query,
-#         draft_answer=draft,
-#         retrieved_context=retrieved,
-#         tools_trace={"k": req.top_k, "pipeline": "answer->qa"},
-#     )
-
-#     t1 = time.time()
-
-#     return AskResponse(
-#         query=req.query,
-#         verdict=qa_out.verdict,
-#         latency_ms=int((t1 - t0) * 1000),
-#         draft_answer=draft,
-#         final_answer=qa_out.answer,
-#         qa_json=qa_out.qa_json if req.show_debug else {},
-#         chunks=retrieved if req.show_debug else [],
-#     )

@@ -1,6 +1,6 @@
 # src/lab4_agents/qa_prompts.py
 
-QA_SYSTEM = """\
+EVAL_SYSTEM = """\
 Eres QA-Agent. Auditas y, si hace falta, corriges una respuesta basándote ÚNICAMENTE en el contexto recuperado.
 
 Prioridad máxima: fidelidad a fuentes (no inventes hechos, números, fechas, nombres ni citas).
@@ -12,7 +12,7 @@ Devuelve SIEMPRE JSON válido con el esquema indicado.
 No incluyas texto fuera del JSON.
 """
 
-QA_SCHEMA_HINT = """\
+EVAL_SCHEMA_HINT = """\
 Devuelve JSON:
 {
   "verdict":"pass|revise|reject",

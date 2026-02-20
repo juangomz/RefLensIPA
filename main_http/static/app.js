@@ -39,7 +39,7 @@ function renderBadge(verdict) {
                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-current opacity-75"></span>
                 <span class="relative inline-flex rounded-full h-2 w-2 bg-current"></span>
             </span>
-            AGENTE QA: ${verdict.toUpperCase()}
+            AGENTE EVAL: ${verdict.toUpperCase()}
         </span>
     `;
 }
@@ -63,7 +63,7 @@ function render() {
     } else if (activeTab === "draft") {
         out.innerHTML = marked.parse(lastData.draft_answer || "");
     } else {
-        out.innerHTML = `<pre class="p-4 bg-black rounded-lg text-indigo-300 text-xs overflow-x-auto">${JSON.stringify(lastData.qa_json, null, 2)}</pre>`;
+        out.innerHTML = `<pre class="p-4 bg-black rounded-lg text-indigo-300 text-xs overflow-x-auto">${JSON.stringify(lastData.eval_json, null, 2)}</pre>`;
     }
 
     // Render de Chunks mejorado

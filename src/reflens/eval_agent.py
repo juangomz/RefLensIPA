@@ -1,21 +1,21 @@
-# src/lab4_agents/qa_agent.py
+# src/lab4_agents/eval_agent.py
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Literal, Callable, Union
 
-from src.reflens.qa_prompts import QA_SYSTEM, QA_SCHEMA_HINT
+from reflens.eval_prompts import EVAL_SYSTEM, EVAL_SCHEMA_HINT
 
 Verdict = Literal["pass", "revise", "reject"]
 Chunk = Dict[str, Any]  # {"id": "...", "text": "...", "score": 0.8, ...}
 
 
 @dataclass
-class QAResult:
+class EvalResult:
     verdict: Verdict
     answer: str
-    qa_json: Dict[str, Any]
+    eval_json: Dict[str, Any]
     raw_model_output: str
 
 
@@ -48,7 +48,7 @@ def _safe_json_load(raw: str) -> Dict[str, Any]:
         raise
 
 
-class QAAgent:
+class EvalAgent:
     def __init__(self, llm_call: Callable[[str, str], str]):
         self.llm_call = llm_call
 
@@ -58,7 +58,7 @@ class QAAgent:
         draft_answer: str,
         retrieved_context: Union[List[str], List[Chunk]],
         tools_trace: Optional[Dict[str, Any]] = None,
-    ) -> QAResult:
+    ) -> EvalResult:
         context_txt = _format_context(retrieved_context)
 
         payload = {
@@ -66,17 +66,17 @@ class QAAgent:
             "draft_answer": draft_answer,
             "retrieved_context": context_txt,
             "tools_trace": tools_trace or {},
-            "instructions": QA_SCHEMA_HINT,
+            "instructions": EVAL_SCHEMA_HINT,
         }
 
         user_prompt = json.dumps(payload, ensure_ascii=False, indent=2)
-        raw = self.llm_call(QA_SYSTEM, user_prompt)
+        raw = self.llm_call(EVAL_SYSTEM, user_prompt)
 
         try:
-            qa = _safe_json_load(raw)
+            eval = _safe_json_load(raw)
         except Exception:
             # fallback: no rompemos el pipeline
-            qa = {
+            eval = {
                 "verdict": "revise",
                 "scores": {"faithfulness": 0.0, "coverage": 0.0, "clarity": 0.0},
                 "issues": [
@@ -84,7 +84,7 @@ class QAAgent:
                         "type": "unclear",
                         "severity": "high",
                         "span": "",
-                        "explanation": "QAAgent no pudo parsear JSON del modelo.",
+                        "explanation": "EvalAgent no pudo parsear JSON del modelo.",
                         "evidence": [],
                     }
                 ],
@@ -92,8 +92,8 @@ class QAAgent:
                 "fixed_answer": "",
             }
 
-        verdict: Verdict = qa.get("verdict", "revise")
-        fixed = (qa.get("fixed_answer") or "").strip()
+        verdict: Verdict = eval.get("verdict", "revise")
+        fixed = (eval.get("fixed_answer") or "").strip()
 
         if verdict == "pass":
             final = draft_answer
@@ -105,4 +105,4 @@ class QAAgent:
                 "¿Quieres que recupere más contexto o puedes especificar mejor la pregunta?"
             )
 
-        return QAResult(verdict=verdict, answer=final, qa_json=qa, raw_model_output=raw)
+        return EvalResult(verdict=verdict, answer=final, eval_json=eval, raw_model_output=raw)

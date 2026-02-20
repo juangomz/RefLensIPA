@@ -1,11 +1,11 @@
-# main_qa.py
+# main_eval.py
 import json
 import os
 from dotenv import load_dotenv
 from openai import OpenAI
 
 from src.reflens.answer_agent import AnswerAgent
-from src.reflens.qa_agent import QAAgent
+from src.reflens.eval_agent import EvalAgent
 
 load_dotenv()
 
@@ -64,25 +64,25 @@ if __name__ == "__main__":
     user_query = "¿Qué se sabe de Napoleón?"
 
     answer_agent = AnswerAgent(llm_call)
-    qa_agent = QAAgent(llm_call)
+    eval_agent = EvalAgent(llm_call)
 
     draft = answer_agent.run(user_query, retrieved, tools_trace={"k": 5}).draft_answer
 
-    out = qa_agent.review(
+    out = eval_agent.review(
         user_query=user_query,
         draft_answer=draft,
         retrieved_context=retrieved,
-        tools_trace={"k": 5, "pipeline": "answer->qa"},
+        tools_trace={"k": 5, "pipeline": "answer->eval"},
     )
 
     print("\n=== DRAFT (AnswerAgent) ===\n")
     print(draft)
 
-    print("\n=== VERDICT (QA) ===")
+    print("\n=== VERDICT (EVAL) ===")
     print(out.verdict)
 
-    print("\n=== FINAL ANSWER (post-QA) ===\n")
+    print("\n=== FINAL ANSWER (post-EVAL) ===\n")
     print(out.answer)
 
-    print("\n=== QA JSON ===")
-    print(json.dumps(out.qa_json, ensure_ascii=False, indent=2))
+    print("\n====EVAL JSON ===")
+    print(json.dumps(out.eval_json, ensure_ascii=False, indent=2))
