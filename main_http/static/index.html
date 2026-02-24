@@ -10,318 +10,790 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.26.0/cytoscape.min.js"></script>
     
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
-        body { 
-            font-family: 'Plus Jakarta Sans', sans-serif; 
-            background: #0f172a; /* Slate 900 */
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+        :root {
+            --neo4j: #10b981;
+            --chroma: #818cf8;
+            --bg: #080d17;
+            --card: rgba(15, 23, 42, 0.75);
+            --border: rgba(148, 163, 184, 0.07);
         }
-        /* Efecto de fondo Aurora */
-        .aurora {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: radial-gradient(circle at 0% 0%, rgba(79, 70, 229, 0.15) 0%, transparent 50%),
-                        radial-gradient(circle at 100% 100%, rgba(139, 92, 246, 0.15) 0%, transparent 50%);
-            z-index: -1;
+
+        * { box-sizing: border-box; }
+        body { font-family: 'DM Sans', sans-serif; background: var(--bg); overflow: hidden; }
+
+        /* ── AURORA ── */
+        .aurora { position: fixed; inset: 0; z-index: -1; overflow: hidden; }
+        .aurora::before, .aurora::after { content: ''; position: absolute; border-radius: 50%; filter: blur(90px); opacity: 0.12; }
+        .aurora::before { width: 600px; height: 600px; top: -150px; left: -100px; background: radial-gradient(circle, #4f46e5, transparent 70%); animation: drift1 18s ease-in-out infinite alternate; }
+        .aurora::after  { width: 500px; height: 500px; bottom: -100px; right: -100px; background: radial-gradient(circle, #7c3aed, transparent 70%); animation: drift2 14s ease-in-out infinite alternate; }
+        @keyframes drift1 { from { transform: translate(0,0) scale(1); } to { transform: translate(80px,60px) scale(1.15); } }
+        @keyframes drift2 { from { transform: translate(0,0) scale(1); } to { transform: translate(-60px,-40px) scale(1.1); } }
+
+        /* ── GLASS ── */
+        .glass { background: var(--card); backdrop-filter: blur(16px); border: 1px solid var(--border); }
+
+        /* ── GRAPH MINI ── */
+        #cy { border-radius: 0.75rem; cursor: pointer; border: 1px solid transparent; transition: border-color 0.2s; }
+        #cy:hover { border-color: rgba(99,102,241,0.2); }
+
+        /* ── FULLSCREEN ── */
+        #graph-fullscreen {
+            display: none; position: fixed; inset: 0; z-index: 9999;
+            background: rgba(5, 8, 18, 0.98);
+            backdrop-filter: blur(24px);
+            flex-direction: column;
         }
-        .glass-card { 
-            background: rgba(30, 41, 59, 0.7); 
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.05);
+        #graph-fullscreen.active { display: flex; }
+        #cy-fs { flex: 1; width: 100%; cursor: grab; }
+        #cy-fs:active { cursor: grabbing; }
+        .fs-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 24px; border-bottom: 1px solid var(--border);
+            background: rgba(8,13,23,0.6);
         }
-        .agent-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .7; transform: scale(0.95); } }
-        #cy { border-radius: 1rem; }
-        .tab-active { background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.3); }
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .fs-footer {
+            padding: 10px 24px; border-top: 1px solid var(--border);
+            display: flex; align-items: center; gap: 16px;
+            background: rgba(8,13,23,0.6);
+        }
+
+        /* ── TOOLTIP ── */
+        .node-tooltip {
+            position: fixed; z-index: 10000;
+            background: rgba(8, 13, 23, 0.97);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+            border-radius: 12px; padding: 10px 13px;
+            font-size: 11px; max-width: 240px;
+            pointer-events: none; display: none;
+            backdrop-filter: blur(16px);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+            line-height: 1.55; color: #cbd5e1;
+        }
+        .tt-title { font-weight: 700; color: #f1f5f9; margin-bottom: 3px; font-size: 11px; }
+        .tt-text  { font-size: 10px; color: #94a3b8; }
+        .tt-score { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: #818cf8; margin-top: 5px; }
+        .tt-src-badge {
+            display: inline-flex; align-items: center; gap: 3px;
+            font-family: 'JetBrains Mono', monospace; font-size: 8px; font-weight: 700;
+            padding: 2px 6px; border-radius: 4px; margin-top: 5px; border: 1px solid;
+        }
+
+        /* ── STATUS ── */
+        .agent-pulse { animation: s-pulse 2s ease-in-out infinite; }
+        @keyframes s-pulse { 0%,100%{ opacity:1; transform:scale(1); } 50%{ opacity:.5; transform:scale(0.8); } }
+
+        /* ── TABS ── */
+        .tab-active { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.25); }
+        .tab-btn { transition: all 0.15s; }
+        .tab-btn:not(.tab-active):hover { color: #e2e8f0; background: rgba(255,255,255,0.04); }
+
+        /* ── STRUCTURE TAGS ── */
+        .struct-tag {
+            display: inline-flex; align-items: center; gap: 4px;
+            font-size: 10px; font-weight: 600; padding: 3px 8px; border-radius: 6px;
+            border: 1px solid; white-space: nowrap;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .struct-tag.entity   { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.25); color: #a5b4fc; }
+        .struct-tag.relation { background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.25); color: #6ee7b7; }
+        .struct-tag.concept  { background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.25); color: #fcd34d; }
+
+        /* ── BARS ── */
+        .source-bar-fill { height: 100%; border-radius: 4px; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+
+        /* ── CHUNKS ── */
+        .chunk-card { transition: all 0.2s; }
+        .chunk-card.neo4j-source  { border-left: 2px solid var(--neo4j); }
+        .chunk-card.chroma-source { border-left: 2px solid var(--chroma); }
+        .chunk-card.focused { background: rgba(255,255,255,0.06) !important; border-color: rgba(255,255,255,0.18) !important; }
+
+        /* ── SCROLLBARS ── */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+
+        /* ── MONO ── */
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        /* ── FADE IN ── */
+        @keyframes fadeIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
+        .fade-in { animation: fadeIn 0.3s ease-out both; }
+
+        /* ── GRAPH STATS ── */
+        .graph-stats { display: flex; gap: 6px; margin-top: 8px; }
+        .graph-stat { flex:1; background: rgba(255,255,255,0.025); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; text-align: center; }
+
+        /* ── EXPAND HINT ── */
+        #expand-hint {
+            position: absolute; bottom: 8px; right: 8px;
+            background: rgba(15,23,42,0.9); border: 1px solid var(--border);
+            border-radius: 6px; padding: 3px 7px;
+            font-family: 'JetBrains Mono', monospace; font-size: 8px; color: #475569;
+            pointer-events: none; opacity: 0; transition: opacity 0.3s;
+        }
+        #cy-wrap:hover #expand-hint { opacity: 1; }
+        .legend-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     </style>
 </head>
 <body class="text-slate-200 overflow-hidden">
-    <div class="aurora"></div>
 
-    <div class="flex h-screen w-full p-4 gap-4">
-        <aside class="w-80 flex flex-col gap-4">
-            <div class="glass-card rounded-3xl p-6 flex flex-col h-full">
-                <div class="flex items-center gap-3 mb-10">
-                    <div class="h-11 w-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                        <i data-lucide="sparkles" class="text-white w-6 h-6"></i>
+<div class="aurora"></div>
+
+<!-- TOOLTIP -->
+<div id="node-tooltip" class="node-tooltip">
+    <div class="tt-title" id="tt-title">—</div>
+    <div class="tt-text"  id="tt-text"></div>
+    <div class="tt-score" id="tt-score"></div>
+    <div id="tt-src"></div>
+</div>
+
+<!-- FULLSCREEN GRAPH -->
+<div id="graph-fullscreen">
+    <div class="fs-header">
+        <div class="flex items-center gap-3">
+            <i data-lucide="git-branch" class="w-4 h-4 text-indigo-400"></i>
+            <span class="mono text-xs font-bold text-slate-300 uppercase tracking-widest">Mapa de Contexto</span>
+            <span class="mono text-[9px] text-slate-600 ml-2">Pantalla completa · ESC para cerrar</span>
+        </div>
+        <div class="flex items-center gap-2">
+            <button onclick="fsCyFit()" class="mono text-[9px] bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">Fit</button>
+            <button id="fs-layout-btn" onclick="toggleFsLayout()" class="mono text-[9px] bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">Cose</button>
+            <button onclick="closeFullscreen()" class="flex items-center gap-1.5 mono text-[9px] bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 px-3 py-1.5 rounded-lg text-rose-400 transition-all">
+                <i data-lucide="x" class="w-3 h-3"></i> Cerrar
+            </button>
+        </div>
+    </div>
+    <div id="cy-fs"></div>
+    <div class="fs-footer">
+        <span class="flex items-center gap-2 text-[10px] mono text-slate-500"><span class="legend-dot" style="background:var(--neo4j)"></span>Neo4j Graph</span>
+        <span class="flex items-center gap-2 text-[10px] mono text-slate-500"><span class="legend-dot" style="background:var(--chroma)"></span>ChromaDB</span>
+        <div id="fs-stats" class="ml-auto mono text-[9px] text-slate-600"></div>
+    </div>
+</div>
+
+<!-- MAIN LAYOUT -->
+<div class="flex h-screen w-full p-3 gap-3">
+
+    <!-- LEFT SIDEBAR -->
+    <aside class="w-60 flex flex-col gap-3 flex-shrink-0">
+        <div class="glass rounded-2xl p-5 flex flex-col h-full">
+            <!-- Logo -->
+            <div class="flex items-center gap-3 mb-8">
+                <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 flex-shrink-0">
+                    <i data-lucide="aperture" class="text-white w-5 h-5"></i>
+                </div>
+                <div>
+                    <h1 class="text-base font-semibold text-white tracking-tight leading-tight">RefLens</h1>
+                    <span class="mono text-[9px] font-bold text-indigo-400 tracking-[0.2em] uppercase">Aura Graph Engine</span>
+                </div>
+            </div>
+
+            <div class="space-y-4 flex-1">
+                <p class="mono text-[9px] font-bold text-slate-500 uppercase tracking-widest">Fuentes activas</p>
+                <div class="p-3 rounded-xl bg-white/[0.03] border border-white/[0.05] space-y-2.5">
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
+                        <div class="legend-dot" style="background:var(--neo4j)"></div>
+                        <span>Neo4j Graph</span>
+                        <span id="neo4j-count" class="mono text-[9px] ml-auto text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded">0</span>
                     </div>
-                    <div>
-                        <h1 class="text-xl font-bold text-white tracking-tight">RefLens</h1>
-                        <span class="text-[10px] font-black text-indigo-400 tracking-[0.2em] uppercase">Intelligence</span>
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
+                        <div class="legend-dot" style="background:var(--chroma)"></div>
+                        <span>ChromaDB</span>
+                        <span id="chroma-count" class="mono text-[9px] ml-auto text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">0</span>
                     </div>
                 </div>
 
-                <div class="space-y-8 flex-1">
-                    <div class="space-y-4">
-                        <label class="text-xs font-bold text-slate-500 uppercase tracking-widest">Parámetros de Agente</label>
-                        <div class="p-4 rounded-2xl bg-slate-800/40 border border-white/5 space-y-3">
-                            <div class="flex justify-between text-xs font-semibold">
-                                <span class="text-slate-400">Contexto (top_k)</span>
-                                <span id="topk-val" class="text-indigo-400">5</span>
-                            </div>
-                            <input id="topk" type="range" min="1" max="30" value="5" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                <!-- Query info -->
+                <div id="query-info" class="hidden p-3 rounded-xl bg-white/[0.03] border border-white/[0.05] space-y-1.5">
+                    <p class="mono text-[9px] font-bold text-slate-500 uppercase tracking-widest">Última consulta</p>
+                    <p id="query-echo" class="text-[10px] text-slate-400 leading-relaxed line-clamp-3 italic"></p>
+                    <div class="flex items-center gap-3 pt-1 border-t border-white/[0.04]">
+                        <span id="meta-latency" class="mono text-[9px] text-slate-600"></span>
+                        <span id="meta-nodes"   class="mono text-[9px] text-slate-600"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="pt-4 border-t border-white/[0.05]">
+                <div class="flex items-center gap-2.5 p-2.5 rounded-xl bg-white/[0.03]">
+                    <div id="status-dot" class="h-2 w-2 rounded-full bg-emerald-500 flex-shrink-0"></div>
+                    <span id="status-text" class="mono text-[9px] font-bold text-emerald-500 uppercase tracking-widest">Sistema Activo</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- MAIN PANEL -->
+    <main class="flex-1 flex flex-col gap-3 min-w-0">
+        <!-- TABS BAR -->
+        <div class="glass h-14 rounded-xl px-4 flex items-center justify-between gap-3">
+            <nav class="flex gap-1.5">
+                <button class="tab-btn tab-active px-3.5 py-1.5 rounded-lg mono text-[10px] font-bold tracking-wide" data-tab="final">Respuesta Final</button>
+                <button class="tab-btn px-3.5 py-1.5 rounded-lg mono text-[10px] font-bold text-slate-500 tracking-wide" data-tab="eval">JSON Eval</button>
+            </nav>
+            <div id="badge-container"></div>
+        </div>
+
+        <!-- ANSWER -->
+        <div class="glass flex-1 rounded-2xl overflow-hidden flex flex-col">
+            <div class="flex-1 overflow-y-auto p-6">
+                <div id="out" class="prose prose-invert prose-slate max-w-none text-slate-300 text-sm leading-relaxed">
+                    <div class="flex flex-col items-center justify-center py-16 text-slate-600">
+                        <i data-lucide="book-open" class="w-10 h-10 mb-3 opacity-40"></i>
+                        <p class="text-sm italic opacity-60">Escribe una pregunta sobre el libro...</p>
+                    </div>
+                </div>
+
+                <!-- STRUCTURE PANEL -->
+                <div id="struct-panel" class="hidden mt-6 fade-in">
+                    <div class="border-t border-white/[0.06] pt-5 space-y-4">
+                        <div class="flex items-center gap-2">
+                            <i data-lucide="layers" class="w-3.5 h-3.5 text-indigo-400"></i>
+                            <span class="mono text-[9px] font-bold text-slate-500 uppercase tracking-widest">Estructura de Conocimiento</span>
                         </div>
-                        <button class="w-full flex items-center justify-between p-4 rounded-2xl bg-slate-800/40 border border-white/5 hover:bg-slate-800/60 transition-all">
-                            <span class="text-xs font-semibold">Modo Debug</span>
-                            <input id="debug" type="checkbox" checked class="w-4 h-4 rounded accent-indigo-500" />
+                        <div id="struct-entities"  class="hidden space-y-1.5"><p class="text-[9px] mono font-bold text-slate-600 uppercase tracking-wider">Entidades</p><div id="entities-tags" class="flex flex-wrap gap-1.5"></div></div>
+                        <div id="struct-relations" class="hidden space-y-1.5"><p class="text-[9px] mono font-bold text-slate-600 uppercase tracking-wider">Relaciones (Neo4j)</p><div id="relations-list" class="space-y-1"></div></div>
+                        <div id="struct-topics"    class="hidden space-y-1.5"><p class="text-[9px] mono font-bold text-slate-600 uppercase tracking-wider">Temas clave</p><div id="topics-tags" class="flex flex-wrap gap-1.5"></div></div>
+                        <div id="struct-sources"   class="hidden space-y-2">
+                            <p class="text-[9px] mono font-bold text-slate-600 uppercase tracking-wider">Distribución de fuentes</p>
+                            <div class="space-y-1.5">
+                                <div class="flex items-center gap-2">
+                                    <span class="w-14 text-right mono text-[9px] text-slate-500">Neo4j</span>
+                                    <div class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div id="neo4j-bar" class="source-bar-fill bg-emerald-500" style="width:0%"></div></div>
+                                    <span id="neo4j-pct" class="w-8 mono text-[9px] text-emerald-400">0%</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span class="w-14 text-right mono text-[9px] text-slate-500">Chroma</span>
+                                    <div class="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden"><div id="chroma-bar" class="source-bar-fill bg-indigo-500" style="width:0%"></div></div>
+                                    <span id="chroma-pct" class="w-8 mono text-[9px] text-indigo-400">0%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- INPUT -->
+            <div class="p-4 border-t border-white/[0.05] bg-slate-950/30">
+                <div class="relative">
+                    <textarea id="query" rows="1"
+                        class="w-full bg-slate-800/50 border border-white/[0.08] rounded-xl py-3.5 pl-4 pr-28 text-sm text-white
+                               placeholder:text-slate-600 focus:ring-1 focus:ring-indigo-500/60 outline-none transition-all resize-none"
+                        placeholder="¿Cuál es el conflicto principal en el capítulo 3?"></textarea>
+                    <div class="absolute right-2 top-1.5 bottom-1.5 flex gap-1.5 items-center">
+                        <button id="clear" class="p-2 text-slate-600 hover:text-slate-300 transition-colors rounded-lg hover:bg-white/5">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button id="ask"
+                            class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white px-5 py-1.5 rounded-lg mono text-[10px] font-bold
+                                   shadow-lg shadow-indigo-600/20 flex items-center gap-1.5 transition-all active:scale-95 h-full">
+                            <span>ASK</span>
+                            <i data-lucide="arrow-up" class="w-3 h-3"></i>
                         </button>
                     </div>
                 </div>
+            </div>
+        </div>
+    </main>
 
-                <div class="pt-6 border-t border-white/5">
-                    <div class="flex items-center gap-3 p-3 rounded-2xl bg-emerald-500/5 border border-emerald-500/10">
-                        <div id="status-dot" class="h-2 w-2 rounded-full bg-emerald-500"></div>
-                        <span id="status-text" class="text-[10px] font-bold text-emerald-500 uppercase">Sistema Activo</span>
-                    </div>
+    <!-- RIGHT SIDEBAR — GRAPH -->
+    <aside class="w-80 flex flex-col gap-3 flex-shrink-0">
+        <div class="glass flex-1 rounded-2xl p-4 flex flex-col overflow-hidden">
+
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <i data-lucide="git-branch" class="w-3.5 h-3.5 text-indigo-400"></i>
+                    <span class="mono text-[9px] font-bold text-slate-500 uppercase tracking-widest">Mapa de Contexto</span>
+                </div>
+                <div class="flex gap-1">
+                    <button onclick="resetZoom()" class="mono text-[9px] bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] px-2 py-1 rounded text-slate-500 hover:text-slate-300 transition-all">Fit</button>
+                    <button id="graph-mode-btn" onclick="toggleGraphMode()" class="mono text-[9px] bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.06] px-2 py-1 rounded text-slate-500 hover:text-slate-300 transition-all">Cose</button>
+                    <button onclick="openFullscreen()" class="mono text-[9px] bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 px-2 py-1 rounded text-indigo-400 hover:text-indigo-300 transition-all flex items-center gap-1">
+                        <i data-lucide="maximize-2" class="w-3 h-3"></i>
+                    </button>
                 </div>
             </div>
-        </aside>
 
-        <main class="flex-1 flex flex-col gap-4">
-            <div class="glass-card h-16 rounded-2xl px-6 flex items-center justify-between">
-                <nav class="flex gap-2">
-                    <button class="tab-btn tab-active px-4 py-1.5 rounded-xl text-xs font-bold transition-all" data-tab="final">Respuesta</button>
-                    <button class="tab-btn px-4 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all" data-tab="draft">Borrador</button>
-                    <button class="tab-btn px-4 py-1.5 rounded-xl text-xs font-bold text-slate-500 hover:text-slate-300 transition-all" data-tab="eval">Estructura</button>
-                </nav>
-                <div id="meta" class="text-[10px] font-mono text-slate-500 bg-slate-800/50 px-3 py-1 rounded-full"></div>
+            <!-- Cytoscape mini + click overlay -->
+            <div id="cy-wrap" class="relative">
+                <div id="cy" class="w-full bg-slate-950/60" style="height:210px; border-radius:0.75rem;"></div>
+                <div id="expand-hint">⤢ clic para pantalla completa</div>
+                <div onclick="openFullscreen()"
+                     style="position:absolute;inset:0;cursor:pointer;border-radius:0.75rem;z-index:2;"
+                     title="Pantalla completa"></div>
             </div>
 
-            <div class="glass-card flex-1 rounded-3xl overflow-hidden flex flex-col">
-                <div id="out-container" class="flex-1 overflow-y-auto p-8">
-                    <div id="badge-container" class="mb-4"></div>
-                    <div id="out" class="prose prose-invert prose-slate max-w-none text-slate-300 leading-relaxed text-sm whitespace-normal">
-                        <div class="flex flex-col items-center justify-center py-20 text-slate-500 opacity-50">
-                            <i data-lucide="command" class="w-12 h-12 mb-4"></i>
-                            <p class="text-sm italic">Escribe una pregunta para analizar el libro...</p>
-                        </div>
-                    </div>
+            <!-- Stats -->
+            <div class="graph-stats">
+                <div class="graph-stat">
+                    <div id="gs-nodes" class="mono text-sm font-bold text-indigo-400">0</div>
+                    <div class="mono text-[8px] text-slate-600 uppercase mt-0.5">Nodos</div>
                 </div>
-
-                <div class="p-6 border-t border-white/5 bg-slate-900/30">
-                    <div class="max-w-2xl mx-auto relative group">
-                        <textarea id="query" rows="1" class="w-full bg-slate-800/50 border border-white/10 rounded-2xl py-4 pl-4 pr-32 text-sm text-white placeholder:text-slate-600 focus:ring-2 focus:ring-indigo-500/50 outline-none transition-all resize-none" placeholder="¿Cuál es el conflicto principal en el capítulo 3?"></textarea>
-                        <div class="absolute right-2 top-2 bottom-2 flex gap-2">
-                            <button id="clear" class="p-2 text-slate-500 hover:text-white transition-colors"><i data-lucide="refresh-cw" class="w-4 h-4"></i></button>
-                            <button id="ask" class="bg-indigo-600 hover:bg-indigo-500 text-white px-6 rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 flex items-center gap-2 transition-all active:scale-95">
-                                <span>ASK</span>
-                                <i data-lucide="send" class="w-3 h-3"></i>
-                            </button>
-                        </div>
-                    </div>
+                <div class="graph-stat">
+                    <div id="gs-edges" class="mono text-sm font-bold text-slate-400">0</div>
+                    <div class="mono text-[8px] text-slate-600 uppercase mt-0.5">Aristas</div>
+                </div>
+                <div class="graph-stat">
+                    <div id="gs-avg" class="mono text-sm font-bold text-amber-400">—</div>
+                    <div class="mono text-[8px] text-slate-600 uppercase mt-0.5">Score Avg</div>
                 </div>
             </div>
-        </main>
 
-        <aside class="w-96 flex flex-col gap-4">
-            <div class="glass-card flex-1 rounded-3xl p-6 flex flex-col overflow-hidden">
-                <div class="flex items-center justify-between mb-4">
-                    <h3 class="text-xs font-bold uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                        <i data-lucide="network" class="w-4 h-4 text-indigo-400"></i> Mapa de Contexto
-                    </h3>
-                    <button onclick="resetZoom()" class="text-[10px] bg-white/5 hover:bg-white/10 px-2 py-1 rounded">Fit</button>
-                </div>
-                
-                <div id="cy" class="w-full h-64 bg-slate-900/50 mb-6"></div>
-
-                <div class="flex-1 overflow-y-auto space-y-3">
-                    <h3 class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Nodos Extraídos</h3>
-                    <div id="chunks" class="space-y-3 text-[11px]"></div>
-                </div>
+            <!-- Chunks -->
+            <div class="flex-1 overflow-y-auto mt-3 space-y-2">
+                <p class="mono text-[9px] font-bold text-slate-600 uppercase tracking-widest px-1">Nodos Extraídos</p>
+                <div id="chunks" class="space-y-1.5"></div>
             </div>
-        </aside>
-    </div>
+        </div>
+    </aside>
+</div>
 
-    <script>
-        const $ = (id) => document.getElementById(id);
-        let lastData = null;
-        let activeTab = "final";
-        let cy = null;
+<script>
+// ══════════════════════════════════
+//  STATE
+// ══════════════════════════════════
+const $ = id => document.getElementById(id);
+let lastData    = null;
+let activeTab   = "final";
+let cy          = null;
+let cyFs        = null;
+let graphLayout = "cose";
+let fsLayout    = "cose";
+let lastChunks  = [];
 
-        // Inicializar iconos
-        lucide.createIcons();
+lucide.createIcons();
 
-        // Actualizar UI del slider
-        $("topk").oninput = (e) => $("topk-val").textContent = e.target.value;
+// ══════════════════════════════════
+//  NODE LABEL — extract real name
+// ══════════════════════════════════
+function getNodeLabel(chunk) {
+    // 1. Explicit non-generic title
+    if (chunk.title && chunk.title.trim() && !["neo4j graph","nodo","chunk"].includes(chunk.title.trim().toLowerCase())) {
+        return chunk.title.trim().slice(0, 24);
+    }
+    // 2. name property
+    if (chunk.name) return String(chunk.name).trim().slice(0, 24);
+    // 3. Parse from Neo4j text: e.name, canonical_name, "name": "..."
+    if (chunk.text) {
+        const patterns = [
+            /e\.name[:\s=]+([^\n|,;\]]+)/i,
+            /canonical_name[:\s=]+([^\n|,;\]]+)/i,
+            /"name"\s*:\s*"([^"]+)"/i,
+            /name[:\s=]+([A-ZÁÉÍÓÚÑ][^\n|,;]{2,24})/,
+        ];
+        for (const re of patterns) {
+            const m = chunk.text.match(re);
+            if (m && m[1].trim().length > 1) return m[1].trim().slice(0, 24);
+        }
+    }
+    // 4. First meaningful words of text (skip common noise)
+    if (chunk.text) {
+        const clean = chunk.text
+            .replace(/props\s*:\s*\[.*?\]/gi, "")
+            .replace(/rel_type\s*:|rel_name\s*:/gi, "")
+            .replace(/[^\wáéíóúñÁÉÍÓÚÑ\s]/g, " ")
+            .trim();
+        const words = clean.split(/\s+/).filter(w => w.length > 2);
+        if (words.length >= 2) return words.slice(0, 3).join(" ").slice(0, 24);
+    }
+    return `#${chunk.id ?? "?"}`;
+}
 
-        // --- MOTOR DE GRAFO PROTEGIDO ---
-        function initGraph(chunks) {
-            try {
-                // Si no hay fragmentos o no es un array, salimos
-                if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
-                    console.warn("No hay chunks para el grafo");
-                    return;
-                }
+// ══════════════════════════════════
+//  GRAPH HELPERS
+// ══════════════════════════════════
+function getNodeColor(chunk) {
+    return (chunk.source || "").toLowerCase().includes("neo4j") ? "#10b981" : "#818cf8";
+}
+function getNodeSize(score) {
+    return score != null ? 10 + Math.round(score * 16) : 14;
+}
 
-                const nodes = chunks.map((c, i) => ({
-                    data: { 
-                        id: `n${i}`, 
-                        label: `Nodo ${i + 1}` 
-                    }
-                }));
+function buildElements(chunks) {
+    const valid = chunks.filter(c => c && c.text && c.text !== "Sin contenido");
+    const nodes = valid.map((c, i) => ({
+        data: {
+            id: `n${i}`, label: getNodeLabel(c),
+            fullText: (c.text || "").slice(0, 160) + ((c.text || "").length > 160 ? "…" : ""),
+            score: c.score, source: c.source || "chroma",
+            color: getNodeColor(c), size: getNodeSize(c.score), idx: i
+        }
+    }));
 
-                const edges = [];
-                for (let i = 0; i < nodes.length - 1; i++) {
-                    edges.push({
-                        data: { 
-                            source: `n${i}`, 
-                            target: `n${i+1}` 
-                        }
-                    });
-                }
-
-                // Destruir instancia previa si existe para evitar errores de memoria
-                if (cy) { cy.destroy(); }
-
-                cy = cytoscape({
-                    container: $('cy'),
-                    elements: { nodes, edges },
-                    style: [
-                        { 
-                            selector: 'node', 
-                            style: { 
-                                'background-color': '#818cf8', 
-                                'label': 'data(label)', 
-                                'color': '#94a3b8', 
-                                'font-size': '10px', 
-                                'width': 12, 
-                                'height': 12,
-                                'text-margin-y': 8
-                            } 
-                        },
-                        { 
-                            selector: 'edge', 
-                            style: { 
-                                'width': 1, 
-                                'line-color': '#334155', 
-                                'curve-style': 'bezier', 
-                                'target-arrow-shape': 'triangle', 
-                                'target-arrow-color': '#334155',
-                                'opacity': 0.6
-                            } 
-                        }
-                    ],
-                    layout: { name: 'cose', padding: 30, animate: true }
-                });
-            } catch (err) {
-                console.error("Error en Cytoscape:", err);
+    const edges = [];
+    if (lastData?.graph_edges?.length) {
+        lastData.graph_edges.forEach((e, i) =>
+            edges.push({ data: { id: `e${i}`, source: `n${e.from}`, target: `n${e.to}` } })
+        );
+    } else {
+        for (let i = 0; i < nodes.length - 1; i++)
+            edges.push({ data: { id: `e${i}`, source: `n${i}`, target: `n${i+1}` } });
+        for (let i = 0; i < valid.length; i++) {
+            for (let j = i + 2; j < valid.length; j++) {
+                if (valid[i].source === valid[j].source && valid[i].source &&
+                    (valid[i].score||0) > 0.72 && (valid[j].score||0) > 0.72 &&
+                    edges.length < nodes.length * 2.5)
+                    edges.push({ data: { id: `ex${i}-${j}`, source: `n${i}`, target: `n${j}` } });
             }
         }
+    }
+    return { nodes, edges };
+}
 
-        function resetZoom() { if(cy) cy.fit(); }
-
-        // --- RENDERIZADO PROTEGIDO ---
-        function render() {
-            if (!lastData) return;
-            const out = $("out");
-            
-            try {
-                // 1. Renderizar Badge
-                const v = lastData.verdict || 'unknown';
-                const color = v === 'pass' ? 'emerald' : 'amber';
-                $("badge-container").innerHTML = `
-                    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-${color}-500/10 border border-${color}-500/20 text-[10px] font-bold text-${color}-400 uppercase">
-                        <i data-lucide="shield-check" class="w-3 h-3"></i> Agent EVAL: ${v}
-                    </div>`;
-
-                // 2. Renderizar Respuesta Principal
-                if (activeTab === "final") {
-                    const rawMarkdown = lastData.final_answer || "Sin respuesta final.";
-                    out.innerHTML = marked.parse(rawMarkdown); // <--- CAMBIO AQUÍ
-                } else if (activeTab === "draft") {
-                    const rawMarkdown = lastData.draft_answer || "Sin borrador.";
-                    out.innerHTML = marked.parse(rawMarkdown); // <--- CAMBIO AQUÍ
-                } else {
-                    out.innerHTML = `<pre class="p-4 bg-slate-900 rounded-2xl text-xs text-indigo-300 overflow-x-auto">${JSON.stringify(lastData.eval_json || {}, null, 2)}</pre>`;
-                }
-
-                // 3. Renderizar Chunks en el lateral
-                const chunkArr = lastData.chunks || [];
-                $("chunks").innerHTML = chunkArr.map((c, i) => `
-                    <div class="p-3 rounded-2xl bg-white/5 border border-white/5 hover:border-indigo-500/30 transition-all group">
-                        <div class="flex justify-between text-[9px] font-bold text-slate-500 mb-1 uppercase">
-                            <span>ID: ${c.id ? c.id.slice(0,5) : i}</span>
-                            <span class="text-indigo-400">SCORE: ${typeof c.score === 'number' ? c.score.toFixed(2) : 'N/A'}</span>
-                        </div>
-                        <p class="text-slate-400 leading-normal line-clamp-2 group-hover:line-clamp-none transition-all">${c.text || 'Sin contenido'}</p>
-                    </div>
-                `).join("");
-
-                // 4. Intentar inicializar el Grafo
-                initGraph(chunkArr);
-                
-                // Refrescar iconos
-                lucide.createIcons();
-
-            } catch (err) {
-                console.error("Error en render():", err);
-                $("status-text").textContent = "ERROR DE RENDERIZADO";
-                $("status-text").classList.replace("text-emerald-500", "text-rose-500");
+function cyStyle(fontSize = "8px", nodeScale = 1) {
+    return [
+        {
+            selector: "node",
+            style: {
+                "background-color": "data(color)",
+                "label": "data(label)",
+                "color": "#64748b",
+                "font-size": fontSize,
+                "font-family": "'JetBrains Mono', monospace",
+                "width":  node => (node.data("size") || 14) * nodeScale,
+                "height": node => (node.data("size") || 14) * nodeScale,
+                "text-valign": "bottom", "text-halign": "center", "text-margin-y": 5,
+                "border-width": 0,
+                "transition-property": "opacity, width, height, border-width",
+                "transition-duration": "0.15s"
             }
+        },
+        { selector: "node.highlighted", style: { "border-width": 2, "border-color": "#f8fafc", "color": "#e2e8f0", "font-size": fontSize === "8px" ? "9px" : "12px", "z-index": 10 } },
+        { selector: "node.dimmed",      style: { "opacity": 0.12 } },
+        { selector: "edge",             style: { "width": 1, "line-color": "#1e293b", "target-arrow-shape": "none", "curve-style": "bezier", "opacity": 0.5 } },
+        { selector: "edge.highlighted", style: { "line-color": "#334155", "opacity": 0.9 } },
+        { selector: "edge.dimmed",      style: { "opacity": 0.04 } }
+    ];
+}
+
+function attachEvents(cyInst, containerEl) {
+    const tt = $("node-tooltip");
+    cyInst.on("mouseover", "node", evt => {
+        const d    = evt.target.data();
+        const pos  = evt.renderedPosition;
+        const rect = containerEl.getBoundingClientRect();
+        $("tt-title").textContent = d.label || "Nodo";
+        $("tt-text").textContent  = d.fullText || "";
+        $("tt-score").textContent = d.score != null ? `Score: ${(d.score*100).toFixed(1)}%` : "";
+        const isNeo = (d.source||"").toLowerCase().includes("neo4j");
+        const s = isNeo
+            ? "color:#6ee7b7;background:rgba(16,185,129,0.1);border-color:rgba(16,185,129,0.3)"
+            : "color:#a5b4fc;background:rgba(99,102,241,0.1);border-color:rgba(99,102,241,0.3)";
+        $("tt-src").innerHTML = `<span class="tt-src-badge" style="border:1px solid;${s}">${isNeo?"Neo4j":"ChromaDB"}</span>`;
+        const x = rect.left + pos.x + 18, y = rect.top + pos.y - 10;
+        tt.style.left    = `${Math.min(x, window.innerWidth  - 260)}px`;
+        tt.style.top     = `${Math.min(y, window.innerHeight - 140)}px`;
+        tt.style.display = "block";
+    });
+    cyInst.on("mouseout", "node", () => { tt.style.display = "none"; });
+    cyInst.on("tap", "node", evt => {
+        const t = evt.target;
+        cyInst.elements().removeClass("highlighted dimmed");
+        const hood = t.closedNeighborhood();
+        cyInst.elements().not(hood).addClass("dimmed");
+        hood.addClass("highlighted");
+        highlightChunk(t.data("idx") ?? -1);
+    });
+    cyInst.on("tap", evt => {
+        if (evt.target === cyInst) {
+            cyInst.elements().removeClass("highlighted dimmed");
+            highlightChunk(-1);
         }
+    });
+}
 
-        async function ask() {
-            const query = $("query").value.trim();
-            if(!query) return;
+// ── MINI ──
+function initGraph(chunks) {
+    const container = $("cy");
+    if (!container || !chunks?.length) return;
+    const { nodes, edges } = buildElements(chunks);
+    if (!nodes.length) return;
+    if (cy) cy.destroy();
+    cy = cytoscape({
+        container, elements: { nodes, edges },
+        style: cyStyle("8px", 1),
+        layout: { name: graphLayout, padding: 22, animate: true, animationDuration: 450, randomize: false },
+        userZoomingEnabled: false, userPanningEnabled: false
+    });
+    attachEvents(cy, container);
+    $("gs-nodes").textContent = nodes.length;
+    $("gs-edges").textContent = edges.length;
+    const scores = chunks.map(c => c.score).filter(s => s != null);
+    $("gs-avg").textContent   = scores.length
+        ? (scores.reduce((a,b)=>a+b,0)/scores.length*100).toFixed(0)+"%"
+        : "—";
+}
 
-            // Bloquear botón y mostrar estado
-            $("ask").disabled = true;
-            const dot = $("status-dot");
-            const text = $("status-text");
-            
-            dot.className = "h-2 w-2 rounded-full bg-indigo-500 agent-pulse";
-            text.textContent = "AGENTE PENSANDO...";
-            text.className = "text-[10px] font-bold text-indigo-400 uppercase";
-            
-            try {
-                const res = await fetch("/api/ask", {
-                    method: "POST",
-                    headers: {"Content-Type":"application/json"},
-                    body: JSON.stringify({ 
-                        query, 
-                        top_k: parseInt($("topk").value), 
-                        show_debug: $("debug").checked 
-                    })
-                });
+window.resetZoom    = () => { if (cy)   cy.fit(undefined, 16); };
+window.toggleGraphMode = () => {
+    const modes = ["cose","circle","breadthfirst","concentric","grid"];
+    graphLayout = modes[(modes.indexOf(graphLayout)+1)%modes.length];
+    $("graph-mode-btn").textContent = graphLayout[0].toUpperCase() + graphLayout.slice(1);
+    if (cy) cy.layout({ name: graphLayout, padding: 22, animate: true, animationDuration: 400 }).run();
+};
 
-                if (!res.ok) throw new Error(`HTTP Error: ${res.status}`);
+// ── FULLSCREEN ──
+window.openFullscreen = () => {
+    if (!lastChunks.length) return;
+    $("graph-fullscreen").classList.add("active");
+    lucide.createIcons();
+    const { nodes, edges } = buildElements(lastChunks);
+    if (cyFs) cyFs.destroy();
+    cyFs = cytoscape({
+        container: $("cy-fs"), elements: { nodes, edges },
+        style: cyStyle("11px", 1.8),
+        layout: { name: fsLayout, padding: 70, animate: true, animationDuration: 650, randomize: false }
+    });
+    attachEvents(cyFs, $("cy-fs"));
+    $("fs-stats").textContent = `${nodes.length} nodos · ${edges.length} aristas`;
+};
 
-                lastData = await res.json();
-                
-                // Renderizamos
-                render();
+window.closeFullscreen = () => {
+    $("graph-fullscreen").classList.remove("active");
+    $("node-tooltip").style.display = "none";
+    if (cyFs) { cyFs.destroy(); cyFs = null; }
+};
 
-                // Si llegamos aquí, todo ha ido bien
-                text.textContent = "SISTEMA ACTIVO";
-                text.className = "text-[10px] font-bold text-emerald-500 uppercase";
-                dot.className = "h-2 w-2 rounded-full bg-emerald-500";
+window.fsCyFit = () => { if (cyFs) cyFs.fit(undefined, 50); };
+window.toggleFsLayout = () => {
+    const modes = ["cose","circle","breadthfirst","concentric","grid"];
+    fsLayout = modes[(modes.indexOf(fsLayout)+1)%modes.length];
+    $("fs-layout-btn").textContent = fsLayout[0].toUpperCase() + fsLayout.slice(1);
+    if (cyFs) cyFs.layout({ name: fsLayout, padding: 70, animate: true, animationDuration: 500 }).run();
+};
 
-            } catch (e) {
-                console.error("Error en la petición:", e);
-                text.textContent = "ERROR DE AGENTE";
-                text.className = "text-[10px] font-bold text-rose-500 uppercase";
-                dot.className = "h-2 w-2 rounded-full bg-rose-500";
-            } finally {
-                $("ask").disabled = false;
-            }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeFullscreen(); });
+
+// ══════════════════════════════════
+//  CHUNK HIGHLIGHT
+// ══════════════════════════════════
+function highlightChunk(idx) {
+    document.querySelectorAll(".chunk-card").forEach((el, i) => {
+        if (idx === -1) { el.style.opacity = "1"; el.classList.remove("focused"); }
+        else if (i === idx) { el.style.opacity = "1"; el.classList.add("focused"); el.scrollIntoView({ behavior: "smooth", block: "nearest" }); }
+        else { el.style.opacity = "0.25"; el.classList.remove("focused"); }
+    });
+}
+
+window.focusNode = idx => {
+    // Mini
+    if (cy) {
+        const n = cy.$(`#n${idx}`);
+        if (n.length) {
+            cy.elements().removeClass("highlighted dimmed");
+            const hood = n.closedNeighborhood();
+            cy.elements().not(hood).addClass("dimmed");
+            hood.addClass("highlighted");
         }
+    }
+    // Fullscreen sync
+    if (cyFs) {
+        const fn = cyFs.$(`#n${idx}`);
+        if (fn.length) {
+            cyFs.elements().removeClass("highlighted dimmed");
+            const fhood = fn.closedNeighborhood();
+            cyFs.elements().not(fhood).addClass("dimmed");
+            fhood.addClass("highlighted");
+            cyFs.animate({ fit: { eles: fhood, padding: 100 }, duration: 400 });
+        }
+    }
+};
 
-        // --- EVENTOS ---
-        $("ask").onclick = ask;
-        
-        document.querySelectorAll(".tab-btn").forEach(btn => {
-            btn.onclick = () => {
-                document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("tab-active"));
-                btn.classList.add("tab-active");
-                activeTab = btn.dataset.tab;
-                render();
-            }
+// ══════════════════════════════════
+//  STRUCTURE PANEL
+// ══════════════════════════════════
+function extractTopics(text) {
+    if (!text) return [];
+    const found = new Set();
+    (text.match(/\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]{3,}/g) || []).forEach(w => found.add(w));
+    return [...found].slice(0, 12);
+}
+
+function renderStructurePanel(data) {
+    const panel = $("struct-panel");
+    if (!data) { panel.classList.add("hidden"); return; }
+
+    const ents = data.entities || [];
+    if (ents.length) {
+        $("entities-tags").innerHTML = ents.map(e => `<span class="struct-tag entity">${escHtml(e.name||e)}</span>`).join("");
+        $("struct-entities").classList.remove("hidden");
+    } else $("struct-entities").classList.add("hidden");
+
+    const rels = data.relations || data.graph_relations || [];
+    if (rels.length) {
+        $("relations-list").innerHTML = rels.slice(0,6).map(r => `
+            <div class="flex items-center gap-1.5 bg-white/[0.02] rounded-lg px-2 py-1.5 border border-white/[0.04]">
+                <span class="struct-tag entity" style="padding:1px 5px;">${escHtml(r.from||r.source||"?")}</span>
+                <span class="struct-tag relation" style="padding:1px 5px;">${escHtml(r.type||r.label||"→")}</span>
+                <span class="struct-tag entity" style="padding:1px 5px;">${escHtml(r.to||r.target||"?")}</span>
+            </div>`).join("");
+        $("struct-relations").classList.remove("hidden");
+    } else $("struct-relations").classList.add("hidden");
+
+    const topics = data.topics || extractTopics(data.final_answer);
+    if (topics.length) {
+        $("topics-tags").innerHTML = topics.map(t => `<span class="struct-tag concept">${escHtml(t)}</span>`).join("");
+        $("struct-topics").classList.remove("hidden");
+    } else $("struct-topics").classList.add("hidden");
+
+    const chunks = data.chunks || [];
+    const total  = chunks.length || 1;
+    const neoN   = chunks.filter(c => (c.source||"").toLowerCase().includes("neo4j")).length;
+    const neoPct = Math.round(neoN/total*100);
+    $("neo4j-bar").style.width  = neoPct+"%";
+    $("chroma-bar").style.width = (100-neoPct)+"%";
+    $("neo4j-pct").textContent  = neoPct+"%";
+    $("chroma-pct").textContent = (100-neoPct)+"%";
+    $("neo4j-count").textContent  = neoN;
+    $("chroma-count").textContent = total-neoN;
+    $("struct-sources").classList.remove("hidden");
+    panel.classList.remove("hidden");
+}
+
+// ══════════════════════════════════
+//  STATUS
+// ══════════════════════════════════
+function setStatus(state, msg) {
+    const dot  = $("status-dot"), text = $("status-text");
+    text.textContent = msg;
+    const m = { loading:["bg-indigo-500 agent-pulse","text-indigo-400"], error:["bg-rose-500","text-rose-400"], ready:["bg-emerald-500","text-emerald-500"] };
+    const [dc,tc] = m[state]||m.ready;
+    dot.className  = `h-2 w-2 rounded-full flex-shrink-0 ${dc}`;
+    text.className = `mono text-[9px] font-bold uppercase tracking-widest ${tc}`;
+}
+
+// ══════════════════════════════════
+//  RENDER
+// ══════════════════════════════════
+function render() {
+    const out = $("out");
+    if (!lastData) {
+        out.innerHTML = `<div class="flex flex-col items-center justify-center py-16 text-slate-600"><i data-lucide="book-open" class="w-10 h-10 mb-3 opacity-40"></i><p class="text-sm italic opacity-60">Escribe una pregunta sobre el libro...</p></div>`;
+        $("chunks").innerHTML = $("badge-container").innerHTML = "";
+        $("struct-panel").classList.add("hidden");
+        $("query-info").classList.add("hidden");
+        lucide.createIcons(); return;
+    }
+
+    // Badge
+    const v = lastData.verdict || "unknown";
+    const bStyles = { pass:"bg-emerald-500/10 border-emerald-500/25 text-emerald-400", revise:"bg-amber-500/10 border-amber-500/25 text-amber-400", fail:"bg-rose-500/10 border-rose-500/25 text-rose-400", unknown:"bg-slate-500/10 border-slate-500/25 text-slate-400" };
+    const bIcons  = { pass:"check-circle", revise:"alert-circle", fail:"x-circle", unknown:"help-circle" };
+    $("badge-container").innerHTML = `
+        <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border mono text-[9px] font-bold uppercase tracking-wider fade-in ${bStyles[v]||bStyles.unknown}">
+            <i data-lucide="${bIcons[v]||'help-circle'}" class="w-3 h-3"></i>
+            Agent Eval: ${v}
+        </div>`;
+
+    // Content
+    if (activeTab === "final") {
+        out.innerHTML = `<div class="fade-in">${marked.parse(lastData.final_answer||"Sin respuesta.")}</div>`;
+    } else {
+        out.innerHTML = `<pre class="p-4 bg-slate-950 rounded-xl mono text-xs text-indigo-300 overflow-x-auto border border-white/[0.05] fade-in">${JSON.stringify(lastData.eval_json||{}, null, 2)}</pre>`;
+    }
+
+    renderStructurePanel(lastData);
+
+    // Chunks
+    const chunks = lastData.chunks || [];
+    lastChunks   = chunks;
+    $("chunks").innerHTML = chunks.map((c, i) => {
+        const isNeo = (c.source||"").toLowerCase().includes("neo4j");
+        const score = typeof c.score === "number" ? c.score : null;
+        const label = getNodeLabel(c);
+        return `
+        <div class="chunk-card ${isNeo?"neo4j-source":"chroma-source"} p-3 rounded-xl bg-white/[0.02] border border-white/[0.05] hover:border-white/[0.1] hover:bg-white/[0.04] transition-all cursor-pointer"
+             onclick="focusNode(${i})">
+            <div class="flex items-center justify-between mb-1">
+                <span class="mono text-[8px] font-bold text-slate-600">#${c.id?String(c.id).slice(0,8):i}</span>
+                <div class="flex items-center gap-1.5">
+                    <span class="mono text-[8px] font-bold ${isNeo?"text-emerald-400":"text-indigo-400"}">${isNeo?"Neo4j":"Chroma"}</span>
+                    ${score!=null?`<span class="mono text-[8px] text-slate-500">${(score*100).toFixed(0)}%</span>`:""}
+                </div>
+            </div>
+            <p class="text-[10px] font-semibold text-slate-200 mb-1 truncate" title="${escHtml(label)}">${escHtml(label)}</p>
+            <p class="text-[10px] text-slate-500 leading-relaxed line-clamp-2">${escHtml(c.text||"Sin contenido")}</p>
+            ${score!=null?`<div class="w-full h-0.5 bg-slate-800 rounded-full mt-2 overflow-hidden"><div class="h-full rounded-full ${isNeo?"bg-emerald-500":"bg-indigo-500"}" style="width:${(score*100).toFixed(0)}%"></div></div>`:""}
+        </div>`;
+    }).join("");
+
+    // Sidebar info
+    const q = lastData.query || $("query").value.trim();
+    if (q) {
+        $("query-echo").textContent     = q;
+        $("meta-latency").textContent   = lastData.latency_ms ? `${lastData.latency_ms}ms` : "";
+        $("meta-nodes").textContent     = chunks.length ? `${chunks.length} nodos` : "";
+        $("query-info").classList.remove("hidden");
+    }
+
+    initGraph(chunks);
+    lucide.createIcons();
+}
+
+// ══════════════════════════════════
+//  UTIL
+// ══════════════════════════════════
+function escHtml(s) {
+    return String(s||"").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
+}
+
+// ══════════════════════════════════
+//  API
+// ══════════════════════════════════
+async function ask() {
+    const query = $("query").value.trim();
+    if (!query) return;
+    setStatus("loading", "Agentes razonando...");
+    $("ask").disabled = true;
+    try {
+        const res = await fetch("/api/ask", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ query, top_k: 10, show_debug: true })
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        lastData = await res.json();
+        render();
+        setStatus("ready", "Análisis completado");
+    } catch (e) {
+        setStatus("error", e.message);
+    } finally {
+        $("ask").disabled = false;
+    }
+}
 
-        // Soporte para Ctrl+Enter
-        $("query").addEventListener("keydown", (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") ask();
-        });
-    </script>
+// ══════════════════════════════════
+//  EVENTS
+// ══════════════════════════════════
+$("ask").onclick   = ask;
+$("clear").onclick = () => {
+    lastData = null; lastChunks = [];
+    $("query").value = "";
+    $("neo4j-count").textContent = $("chroma-count").textContent = "0";
+    if (cy)   { cy.destroy();   cy   = null; }
+    if (cyFs) { cyFs.destroy(); cyFs = null; }
+    closeFullscreen();
+    render();
+    setStatus("ready", "Sesión limpia");
+};
+
+document.querySelectorAll(".tab-btn").forEach(btn => {
+    btn.onclick = () => {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("tab-active"));
+        btn.classList.add("tab-active");
+        activeTab = btn.dataset.tab;
+        render();
+    };
+});
+
+$("query").addEventListener("keydown",  e => { if ((e.ctrlKey||e.metaKey) && e.key==="Enter") ask(); });
+$("query").addEventListener("input", function() {
+    this.style.height = "auto";
+    this.style.height = Math.min(this.scrollHeight, 120) + "px";
+});
+</script>
 </body>
 </html>

@@ -19,61 +19,13 @@ A minimal, educational AI agents framework demonstrating how AI agents interact 
 uv sync --frozen
 ```
 
-### Option 1: Simple Example (main.py)
-
-Run a basic single-shot example:
+### Run HTTP app
 
 ```bash
-uv run main.py
+uv run env PYTHONPATH=src uvicorn main_http.app:app --reload --port 8000
 ```
 
-This demonstrates:
-
-- Creating an agent with tools
-- Sending queries to the agent
-- Receiving responses with tool execution
-
-### Option 2: Interactive TUI (main-tui.py)
-
-Launch an interactive terminal UI for continuous conversation:
-
-```bash
-uv run main-tui.py
-```
-
-Features:
-
-- **Persistent History**: Follow-up questions work naturally (context-aware)
-- **Styled Output**: Rich formatting with panels and colors
-- **Verbose Mode**: See tool calls and their results with `--verbose` flag
-- **Slash Commands**: Control the session with `/help`, `/reset`, `/verbose`, `/quit`
-
-#### Verbose Mode
-
-Start with verbose output enabled:
-
-```bash
-uv run main-tui.py --verbose
-```
-
-Or toggle it during the session:
-
-```
-You: What is 25 * 4?
-You: /verbose
-✓ Verbose mode enabled.
-You: What is 100 / 5?
-# Now shows tool calls before responses
-```
-
-#### Available Slash Commands
-
-| Command            | Action                                           |
-| ------------------ | ------------------------------------------------ |
-| `/help`            | Show available commands                          |
-| `/reset`           | Clear conversation history (keeps system prompt) |
-| `/verbose`         | Toggle verbose mode (shows tool calls)           |
-| `/quit` or `/exit` | Exit the TUI                                     |
+Then open http://127.0.0.1:8000
 
 ## Architecture
 
@@ -146,8 +98,7 @@ See `.env.example` for all available configuration options.
 
 ```
 lab4_agents/
-├── main.py                      # Simple example
-├── main-tui.py                  # Interactive TUI launcher
+├── main_http/                   # FastAPI app + web UI
 ├── src/lab4_agents/
 │   ├── agent.py                 # Core Agent class
 │   ├── tool.py                  # Tool definition
