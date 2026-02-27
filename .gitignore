@@ -22,3 +22,6 @@ venv/
 venv/
 .venv/
 
+
+# Evaluation outputs
+evaluations/results/
