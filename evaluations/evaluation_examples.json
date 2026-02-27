@@ -1,0 +1,32 @@
+[
+  {
+    "query": "¿Cómo se relacionan la figura del emperador, la guerra y el hombre desconocido en Bailén?",
+    "answer": "En Bailén, el emperador Napoleón simboliza el poder imperial que impulsa la guerra, mientras que el hombre desconocido representa al pueblo anónimo que sufre y participa en el conflicto; Galdós contrapone así la grandeza abstracta del emperador con la experiencia real y humana de la guerra vivida por individuos corrientes.",
+    "contexts": [
+      "La Guerra de la Independencia enfrenta al imperio napoleónico contra el levantamiento español.",
+      "Napoleón aparece como figura lejana pero determinante en el desarrollo del conflicto.",
+      "Galdós otorga protagonismo narrativo a personajes humildes y anónimos que encarnan el sufrimiento y la valentía popular."
+    ],
+    "trace_id": "trace_101"
+  },
+  {
+    "query": "¿Qué relación existe entre Pratzen, la Batalla de Austerlitz y Napoleón en el contexto histórico mencionado en Bailén?",
+    "answer": "Pratzen fue el punto estratégico clave en la Batalla de Austerlitz (1805), donde Napoleón logró una de sus victorias más brillantes al derrotar a las tropas austro-rusas. Esta victoria consolidó su prestigio militar en Europa y ayuda a contextualizar, en Bailén, la posterior sorpresa que supuso la derrota francesa en España.",
+    "contexts": [
+      "La Batalla de Austerlitz es conocida como la 'Batalla de los Tres Emperadores' y tuvo lugar en 1805.",
+      "La meseta de Pratzen fue el elemento táctico central del plan de Napoleón para dividir y vencer al ejército aliado.",
+      "Las victorias previas de Napoleón explican la percepción de invencibilidad que se rompe más adelante en la Guerra de la Independencia."
+    ],
+    "trace_id": "trace_102"
+  },
+  {
+    "query": "¿Cómo se relacionan Santorcaz, Santiago Fernández y el Marqués de Sarria en Bailén?",
+    "answer": "Santorcaz, como personaje intrigante y manipulador, influye ideológicamente en Santiago Fernández, mientras que el Marqués de Sarria representa la autoridad militar y el orden tradicional; sus interacciones reflejan el choque entre ambición personal, pensamiento político y jerarquía social en el contexto de la guerra.",
+    "contexts": [
+      "Santorcaz es presentado como un personaje astuto, con inclinaciones políticas y capacidad de influencia sobre otros personajes.",
+      "Santiago Fernández aparece vinculado a Santorcaz y a los acontecimientos militares.",
+      "El Marqués de Sarria encarna la figura de mando dentro del ejército español durante la campaña de Bailén."
+    ],
+    "trace_id": "trace_103"
+  }
+]
