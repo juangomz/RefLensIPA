@@ -17,3 +17,8 @@ venv
 venv/
 .venv/
 
+
+# Virtual env
+venv/
+.venv/
+
