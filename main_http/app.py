@@ -79,7 +79,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
             model=GROQ_MODEL,
             messages=messages,
             tools=tool_schemas,
-            tool_choice="auto",   # ✅ CLAVE
+            tool_choice="auto",
         )
 
         msg = resp.choices[0].message
@@ -96,11 +96,42 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
 
             # Extraemos contextos tipo chunks desde las respuestas de tools
             retrieved_context: list = []
+
             for r in tool_results:
+                # Chroma: ya viene bien
                 if isinstance(r, dict) and "results" in r and isinstance(r["results"], list):
                     retrieved_context.extend(r["results"])
+
+                # Neo4j: rows -> convertir a pseudo-chunks para UI
                 elif isinstance(r, dict) and "rows" in r and isinstance(r["rows"], list):
-                    retrieved_context.extend(r["rows"])
+                    for row in r["rows"]:
+                        if not isinstance(row, dict):
+                            continue
+
+                        # Entidad (tiene 'id' y 'type')
+                        if "id" in row and "type" in row:
+                            name = row.get("name") or row.get("canonical_name") or "Entity"
+                            retrieved_context.append({
+                                "id": f"neo4j:{row.get('id')}",
+                                "source": "neo4j",
+                                "title": name,
+                                "name": name,
+                                "score": None,
+                                "text": f"Entity({row.get('type')}): {name} | canonical={row.get('canonical_name')} | aliases={row.get('aliases', [])}",
+                                "meta": row,
+                            })
+
+                        # Relación (tiene 'rel' y 'target')
+                        elif "rel" in row and "target" in row:
+                            retrieved_context.append({
+                                "id": f"neo4j:rel:{row.get('target')}",
+                                "source": "neo4j",
+                                "title": "REL",
+                                "score": None,
+                                "text": f"REL -> {row.get('target')}",
+                                "meta": row,
+                            })
+
                 elif isinstance(r, list):
                     retrieved_context.extend(r)
 
@@ -228,6 +259,13 @@ def index():
 
 @app.post("/api/ask")
 def ask(req: AskRequest):
+    import os, hashlib
+
+    def fp(key: str | None) -> str:
+        if not key:
+            return "MISSING"
+        return hashlib.sha256(key.encode()).hexdigest()[:10]
+    
     t0 = time.time()
     out = llm_call_with_tools(
         system_prompt=QUERY_AGENT_SYSTEM,
@@ -244,7 +282,7 @@ def ask(req: AskRequest):
         try:
             vector_tool = query_agent.tools.get("vector_search")
             if vector_tool:
-                vec_out = vector_tool.execute({"query": req.query, "k": req.top_k, "where": None})
+                vec_out = vector_tool.execute({"query": req.query, "k": 5, "where": None})
                 retrieved = vec_out.get("results") if isinstance(vec_out, dict) else []
         except Exception:
             retrieved = []
@@ -254,17 +292,54 @@ def ask(req: AskRequest):
         print(f"[API_ASK] calling AnswerAgent with retrieved={len(retrieved)} chunks; tool_results={len(out.get('tool_results') or []) if isinstance(out, dict) else 0}", flush=True)
     except Exception:
         pass
+    
+    def compact_retrieved(retrieved: list, top_k: int, max_chars: int = 600) -> list:
+        out = []
+        for c in (retrieved or [])[:top_k]:
+            if not isinstance(c, dict):
+                continue
+            # normaliza nombres de clave (tu chroma usa chunk_id)
+            cid = c.get("chunk_id") or c.get("id")
+            out.append({
+                "chunk_id": cid,
+                "source": c.get("source"),
+                "score": c.get("score") or c.get("distance"),
+                "text": (c.get("text") or "")[:max_chars],
+                "meta": c.get("meta") or {"doc_id": c.get("doc_id")},
+            })
+        return out
+    
+    def normalize_chunks(retrieved: list, top_k: int, max_chars: int = 600):
+        out = []
+        for c in (retrieved or [])[:top_k]:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("chunk_id") or c.get("id") or c.get("meta", {}).get("chunk_id") or "c_?"
+            out.append({
+                "cid": cid,  # 👈 clave estable para citar
+                "text": (c.get("text") or "")[:max_chars],
+                "source": c.get("source"),
+                "score": c.get("score") if c.get("score") is not None else c.get("distance"),
+                "meta": c.get("meta") or {},
+            })
+        return out
+    
+    retrieved = normalize_chunks(retrieved, req.top_k, max_chars=600)
 
     # Generar borrador con AnswerAgent
-    draft = answer_agent.run(req.query, retrieved, tools_trace={"tool_results": out.get("tool_results") if isinstance(out, dict) else []}).draft_answer
+    draft = answer_agent.run(
+    req.query,
+    retrieved,
+    tools_trace={"tool_results": []},  # no duplicar
+).draft_answer
 
     # Pasar por eval
     eval_out = eval_agent.review(
-        user_query=req.query,
-        draft_answer=draft,
-        retrieved_context=retrieved,
-        tools_trace={"tool_results": out.get("tool_results") if isinstance(out, dict) else [], "pipeline": "query->answer->eval"},
-    )
+    user_query=req.query,
+    draft_answer=draft,
+    retrieved_context=retrieved,
+    tools_trace={"tool_results": []},
+)
 
     t1 = time.time()
 

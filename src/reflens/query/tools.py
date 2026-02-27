@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from reflens.tool import Tool
 from reflens.graph.neo4j_client import Neo4jClient
 
+from langfuse import observe, get_client
 
 # -------- Chroma tool --------
 
@@ -30,7 +31,8 @@ def make_chroma_search_tool(persist_dir: str, embedding_model: EmbeddingModel, c
         settings=Settings(anonymized_telemetry=False),
     )
     collection = client.get_or_create_collection(collection_name)
-
+    
+    @observe(name="vector_search", as_type="tool", capture_input=True, capture_output=True)
     def _search(args: dict[str, Any]) -> dict[str, Any]:
         p = VectorSearchParams(**args)
 
@@ -39,7 +41,7 @@ def make_chroma_search_tool(persist_dir: str, embedding_model: EmbeddingModel, c
             q_emb = q_emb.tolist()
 
         res = collection.query(
-            query_embeddings=[q_emb],   # <- clave
+            query_embeddings=[q_emb],
             n_results=p.k,
             where=p.where,
             include=["documents", "metadatas", "distances"],
@@ -53,7 +55,7 @@ def make_chroma_search_tool(persist_dir: str, embedding_model: EmbeddingModel, c
         for i in range(len(docs)):
             meta = metas[i] or {}
             out.append({
-                "chunk_id": meta.get("chunk_id"),  # IMPORTANT: guardarlo en metadata al upsert
+                "chunk_id": meta.get("chunk_id"),
                 "doc_id": meta.get("doc_id"),
                 "source": meta.get("source"),
                 "timestamp": meta.get("timestamp"),
@@ -61,10 +63,14 @@ def make_chroma_search_tool(persist_dir: str, embedding_model: EmbeddingModel, c
                 "distance": dists[i],
                 "meta": meta,
             })
-            
+
         print("[CHROMA] query=", p.query, "k=", p.k, "returned=", len(out), flush=True)
 
-        return {"results": out, "k": p.k}
+        return {
+            "results": out,
+            "k": p.k,
+            "query": p.query,   # útil para debug en Langfuse
+        }
 
     return Tool(
         name="vector_search",
@@ -81,15 +87,16 @@ class GraphQueryParams(BaseModel):
     params: Optional[dict[str, Any]] = Field(default=None, description="Cypher parameters dict")
 
 def make_neo4j_query_tool(neo4j: Neo4jClient) -> Tool:
+    @observe(name="neo4j_query",as_type="tool" ,capture_input=True, capture_output=True)
     def _query(args: dict[str, Any]) -> dict[str, Any]:
         p = GraphQueryParams(**args)
-        rows = neo4j.run(p.cypher, p.params)
-        return {"rows": rows}
-    
-    def graph_query(cypher: str, params: dict):
-        print("[NEO4J]", cypher, params)
-        return neo4j.query(cypher, params)
 
+        rows = neo4j.run(p.cypher, p.params)
+
+        return {
+            "rows": rows,
+        }
+        
     return Tool(
         name="graph_query",
         description="Run a Cypher query on the knowledge graph (Neo4j) and return rows.",

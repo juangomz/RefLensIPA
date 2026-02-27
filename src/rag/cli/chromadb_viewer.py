@@ -229,7 +229,17 @@ def render_search_tab(vector_store: VectorStore):
     with col_search:
         query = st.text_input("Search query", placeholder="Enter a search query...")
     with col_k:
-        top_k = st.number_input("Results", min_value=1, max_value=50, value=5)
+        default_top_k = {
+            "Dense": settings.retrieval_dense_top_k,
+            "BM25": settings.retrieval_sparse_top_k,
+            "Hybrid": settings.retrieval_hybrid_final_top_k,
+        }.get(retriever_type, 5)
+        top_k = st.number_input(
+            "Results",
+            min_value=1,
+            max_value=20,
+            value=min(max(int(default_top_k), 1), 20),
+        )
 
     # Show hybrid settings if selected
     if retriever_type == "Hybrid":

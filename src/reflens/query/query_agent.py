@@ -12,22 +12,39 @@ Tools:
 - vector_search({query, k, where}) -> {results:[{chunk_id, doc_id, source, timestamp, text, distance, meta}], k}
 - graph_query({cypher, params}) -> {rows:[...]}
 
-Graph schema constraints (IMPORTANT):
-- Do NOT assume any properties exist except:
-  - Entity: name
-  - Chunk: chunk_id (if present), otherwise use id
+Graph schema (authoritative):
+- Labels:
+  - (:Entity) properties: id, name, canonical_name, aliases, type, confidence, updated_at
+  - (:Chunk)  properties may include: chunk_id, doc_id, source, timestamp, text (do not assume others)
 - Relationship types: use ONLY :REL and :MENTIONED_IN.
-- If you need to know available properties, FIRST run:
-  MATCH (e:Entity) RETURN keys(e) AS props LIMIT 1
-  MATCH (c:Chunk)  RETURN keys(c) AS props LIMIT 1
-- Never use e.description or c.timestamp/c.source unless you've verified they exist via keys().
 
-Your job:
-1) You MUST call vector_search at least once for every question, before any graph_query. If vector_search returns 1+ results, include at least 2 chunk_ids in Sources.
-2) Use graph_query to fetch structured facts and evidence links relevant to the question:
-   - Entities and their outgoing/incoming :REL edges
-   - Evidence via (Entity)-[:MENTIONED_IN]->(Chunk)
-3) Answer concisely and include a short Sources list with chunk_id/source when available.
+Rules:
+1) You MUST call vector_search at least once for every question BEFORE any graph_query.
+2) For questions of the form "Who is X?", "What is X?", "Tell me about X":
+   - You MUST run a graph entity lookup using this exact Cypher template (no schema introspection first):
+     MATCH (e:Entity)
+     WHERE (e.name IS NOT NULL AND toLower(e.name) CONTAINS toLower($q))
+        OR (e.canonical_name IS NOT NULL AND toLower(e.canonical_name) CONTAINS toLower($q))
+        OR (e.aliases IS NOT NULL AND any(a IN e.aliases WHERE toLower(a) CONTAINS toLower($q)))
+     RETURN e.name AS name, e.canonical_name AS canonical_name, e.type AS type, e.aliases AS aliases, e.id AS id
+     LIMIT 20
+   - Use params {"q": "<X>"}.
+3) NEVER run keys()/schema introspection unless:
+   - a graph_query fails with an error, OR
+   - the lookup query returns 0 rows AND you need to adapt.
+4) After finding an entity, you MAY fetch relations and evidence:
+   - Relations:
+     MATCH (e:Entity {id: $id})-[r:REL]->(e2:Entity)
+     RETURN type(r) AS rel, e2.name AS target
+     LIMIT 25
+   - Evidence:
+     MATCH (e:Entity {id: $id})-[:MENTIONED_IN]->(c:Chunk)
+     RETURN c.chunk_id AS chunk_id, c.doc_id AS doc_id, c.source AS source
+     LIMIT 10
+
+Output:
+- Answer concisely.
+- Include Sources: list chunk_id + source from vector_search and any Chunk results from the graph.
 """
 
 class QueryAgent(Agent):
@@ -39,7 +56,6 @@ class QueryAgent(Agent):
     ):
         neo4j = Neo4jClient.from_env()
 
-        # ✅ crea el embedding model igual que en ingesta
         embedding_model = EmbeddingModel(
             api_key=settings.azure_openai_api_key,
             api_version=settings.azure_openai_api_version,

@@ -28,7 +28,7 @@ def _format_context(retrieved_context: Union[List[str], List[Chunk]]) -> str:
 
     blocks: List[str] = []
     for c in retrieved_context:
-        cid = c.get("id", "c_?")
+        cid = c.get("chunk_id") or c.get("id") or c.get("meta", {}).get("chunk_id") or "c_?"
         score = c.get("score", "")
         title = c.get("title") or c.get("source") or ""
         text = (c.get("text") or "").strip()
@@ -57,7 +57,7 @@ class AnswerAgent:
             "retrieved_context": context_txt,
             "tools_trace": tools_trace or {},
             "style": ANSWER_STYLE,
-            "instruction": "Responde solo con texto (no JSON). Añade citas (c_i).",
+            "instruction": "Responde solo con texto (no JSON). Añade citas usando el ID exacto que aparece entre corchetes en el contexto (por ejemplo: (c_241), (c_0)). No inventes identificadores.",
         }
         user_prompt = json.dumps(payload, ensure_ascii=False, indent=2)
 

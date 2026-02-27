@@ -45,13 +45,10 @@ class Settings(BaseSettings):
         ..., description="Azure OpenAI embedding deployment name"
     )
 
-    # # LangFuse Configuration
-    # langfuse_public_key: str = Field(..., description="LangFuse public key")
-    # langfuse_secret_key: str = Field(..., description="LangFuse secret key")
-    # langfuse_base_url: str = Field(..., description="LangFuse host URL")
-    langfuse_public_key: str | None = None
-    langfuse_secret_key: str | None = None
-    langfuse_base_url: str | None = None
+    # LangFuse Configuration
+    langfuse_public_key: str = Field(..., description="LangFuse public key")
+    langfuse_secret_key: str = Field(..., description="LangFuse secret key")
+    langfuse_base_url: str = Field(..., description="LangFuse host URL")
 
     # ChromaDB Configuration
     chroma_persist_directory: str = Field(
