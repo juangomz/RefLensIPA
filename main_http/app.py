@@ -1,5 +1,6 @@
 import os
 import time
+import re
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
@@ -7,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from openai import OpenAI
+from openai import OpenAI, BadRequestError
 from src.rag.config import settings
 
 # Importa tus agentes (ajusta el path según dónde los tengas)
@@ -74,13 +75,38 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
     ]
 
     tool_results = []
+    called_tools: list[str] = []
     for _ in range(max_tool_rounds):
-        resp = client.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=messages,
-            tools=tool_schemas,
-            tool_choice="auto",
-        )
+        try:
+            resp = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                tools=tool_schemas,
+                tool_choice="auto",
+            )
+        except BadRequestError as e:
+            err_txt = str(e)
+            # Algunos modelos pueden devolver nombres de tools corruptos/no existentes
+            # o producir salida no parseable durante tool calling.
+            # Degradamos de forma segura para que el endpoint siga y active fallbacks.
+            if (
+                "not in request.tools" in err_txt
+                or "tool call validation failed" in err_txt
+                or "output_parse_failed" in err_txt
+                or "generated output that could not be parsed" in err_txt
+            ):
+                try:
+                    print(f"[LLM_TOOLS] tool-calling parse/validation failure; fallback path. error={err_txt}", flush=True)
+                except Exception:
+                    pass
+                return {
+                    "assistant_text": "",
+                    "tool_results": tool_results,
+                    "retrieved_context": [],
+                    "called_tools": called_tools,
+                    "error": "tool_calling_failed_from_model",
+                }
+            raise
 
         msg = resp.choices[0].message
 
@@ -145,6 +171,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
                 "assistant_text": msg.content or "",
                 "tool_results": tool_results,
                 "retrieved_context": retrieved_context,
+                "called_tools": called_tools,
             }
 
         # Guardamos el mensaje del asistente con tool_calls
@@ -165,6 +192,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
                 args = {"_raw": args_raw}
 
             tool = agent_tools.get(name)
+            called_tools.append(name)
             if tool is None:
                 result = {"error": f"Unknown tool: {name}"}
             else:
@@ -188,6 +216,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
         "assistant_text": "",
         "tool_results": tool_results,
         "retrieved_context": [],
+        "called_tools": called_tools,
         "error": "Stopped after max_tool_rounds without a final answer.",
     }
 
@@ -273,6 +302,7 @@ def ask(req: AskRequest):
         agent_tools=query_agent.tools,
         max_tool_rounds=4,  # evita loops infinitos
     )
+    called_tools = out.get("called_tools") if isinstance(out, dict) else []
 
     # Aseguramos la forma esperada por la UI
     retrieved = out.get("retrieved_context") if isinstance(out, dict) else []
@@ -287,9 +317,68 @@ def ask(req: AskRequest):
         except Exception:
             retrieved = []
 
+    # Fallback pragmático: si el LLM no llamó Neo4j y la pregunta parece de entidad, consultamos grafo.
+    def _entity_focus_query(q: str) -> str:
+        ql = q.strip().lower()
+        patterns = [
+            r"^\s*who is\s+",
+            r"^\s*what is\s+",
+            r"^\s*tell me about\s+",
+            r"^\s*quien es\s+",
+            r"^\s*quién es\s+",
+            r"^\s*que es\s+",
+            r"^\s*qué es\s+",
+            r"^\s*hablame de\s+",
+            r"^\s*háblame de\s+",
+        ]
+        for p in patterns:
+            if re.match(p, ql):
+                cleaned = re.sub(p, "", ql).strip(" ?!.,;:")
+                return cleaned or q.strip()
+        return ""
+
+    entity_q = _entity_focus_query(req.query)
+    used_graph = isinstance(called_tools, list) and ("graph_query" in called_tools)
+    if entity_q and not used_graph:
+        try:
+            graph_tool = query_agent.tools.get("graph_query")
+            if graph_tool:
+                graph_out = graph_tool.execute({
+                    "cypher": """
+                        MATCH (e:Entity)
+                        WHERE (e.name IS NOT NULL AND toLower(e.name) CONTAINS toLower($q))
+                           OR (e.canonical_name IS NOT NULL AND toLower(e.canonical_name) CONTAINS toLower($q))
+                           OR (e.aliases IS NOT NULL AND any(a IN e.aliases WHERE toLower(a) CONTAINS toLower($q)))
+                        RETURN e.name AS name, e.canonical_name AS canonical_name, e.type AS type, e.aliases AS aliases, e.id AS id
+                        LIMIT 20
+                    """,
+                    "params": {"q": entity_q},
+                })
+                rows = graph_out.get("rows") if isinstance(graph_out, dict) else []
+                if isinstance(rows, list):
+                    for row in rows:
+                        if not isinstance(row, dict):
+                            continue
+                        name = row.get("name") or row.get("canonical_name") or "Entity"
+                        retrieved.append({
+                            "id": f"neo4j:{row.get('id')}",
+                            "source": "neo4j",
+                            "title": name,
+                            "score": None,
+                            "text": f"Entity({row.get('type')}): {name} | canonical={row.get('canonical_name')} | aliases={row.get('aliases', [])}",
+                            "meta": row,
+                        })
+        except Exception:
+            pass
+
     # Debug: registrar antes de llamar a AnswerAgent
     try:
-        print(f"[API_ASK] calling AnswerAgent with retrieved={len(retrieved)} chunks; tool_results={len(out.get('tool_results') or []) if isinstance(out, dict) else 0}", flush=True)
+        print(
+            f"[API_ASK] calling AnswerAgent with retrieved={len(retrieved)} chunks; "
+            f"tool_results={len(out.get('tool_results') or []) if isinstance(out, dict) else 0}; "
+            f"called_tools={called_tools}",
+            flush=True,
+        )
     except Exception:
         pass
     
@@ -311,16 +400,22 @@ def ask(req: AskRequest):
     
     def normalize_chunks(retrieved: list, top_k: int, max_chars: int = 600):
         out = []
-        for c in (retrieved or [])[:top_k]:
+        for i, c in enumerate((retrieved or [])[:top_k]):
             if not isinstance(c, dict):
                 continue
-            cid = c.get("chunk_id") or c.get("id") or c.get("meta", {}).get("chunk_id") or "c_?"
+            meta = c.get("meta") or {}
+            cid = c.get("chunk_id") or c.get("id") or meta.get("chunk_id") or f"c_{i}"
             out.append({
-                "cid": cid,  # 👈 clave estable para citar
+                "id": cid,
+                "chunk_id": cid,
                 "text": (c.get("text") or "")[:max_chars],
                 "source": c.get("source"),
                 "score": c.get("score") if c.get("score") is not None else c.get("distance"),
-                "meta": c.get("meta") or {},
+                "meta": {
+                    **meta,
+                    "doc_id": c.get("doc_id") or meta.get("doc_id"),
+                    "chunk_id": cid,
+                },
             })
         return out
     
