@@ -8,8 +8,11 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from openai import OpenAI, BadRequestError
+from openai import OpenAI
+from openai import BadRequestError
+from langfuse import get_client, observe
 from src.rag.config import settings
+from src.rag.observability.langfuse_client import configure_langfuse
 
 # Importa tus agentes (ajusta el path según dónde los tengas)
 from src.reflens.answer.answer_agent import AnswerAgent
@@ -19,6 +22,13 @@ from src.reflens.eval_agent import EvalAgent
 import json
 
 load_dotenv()
+
+if (
+    settings.langfuse_public_key
+    and settings.langfuse_secret_key
+    and settings.langfuse_base_url
+):
+    configure_langfuse()
 
 GROQ_API_ENDPOINT = os.getenv("GROQ_API_ENDPOINT")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -65,6 +75,37 @@ def tool_to_openai_schema(t) -> dict:
         },
     }
 
+
+@observe(as_type="span")
+def _execute_http_tool(tool_name: str, args: dict[str, Any], agent_tools: dict):
+    source_db = "unknown"
+    if tool_name == "vector_search":
+        source_db = "chroma"
+    elif tool_name == "graph_query":
+        source_db = "neo4j"
+
+    get_client().update_current_span(
+        name=f"http-tool:{tool_name}",
+        input=args,
+        metadata={"tool_name": tool_name, "source_db": source_db},
+    )
+
+    tool = agent_tools.get(tool_name)
+    if tool is None:
+        result = {"error": f"Unknown tool: {tool_name}"}
+        get_client().update_current_span(output=result, level="ERROR")
+        return result
+
+    try:
+        result = tool.execute(args)
+        get_client().update_current_span(output=result)
+        return result
+    except Exception as e:
+        result = {"error": f"Tool failed: {tool_name}", "detail": str(e)}
+        get_client().update_current_span(output=result, level="ERROR")
+        return result
+
+@observe(name="http-query-with-tools")
 def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict, max_tool_rounds: int = 4) -> str:
     # agent_tools: dict[str, Tool]
     tool_schemas = [tool_to_openai_schema(t) for t in agent_tools.values()]
@@ -73,6 +114,54 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_prompt},
     ]
+
+    def _extract_retrieved_from_tool_result(result: Any) -> list[dict[str, Any]]:
+        extracted: list[dict[str, Any]] = []
+
+        if isinstance(result, dict) and "results" in result and isinstance(result["results"], list):
+            for item in result["results"]:
+                if not isinstance(item, dict):
+                    continue
+                extracted.append(
+                    {
+                        "id": item.get("chunk_id") or item.get("id") or "c_?",
+                        "text": item.get("text") or "",
+                        "score": item.get("score", item.get("distance")),
+                        "title": item.get("title") or item.get("source") or "",
+                        "source": item.get("source") or "chroma",
+                        "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
+                    }
+                )
+        elif isinstance(result, dict) and "rows" in result and isinstance(result["rows"], list):
+            for idx, row in enumerate(result["rows"]):
+                if not isinstance(row, dict):
+                    continue
+                row_text = " | ".join([f"{k}: {v}" for k, v in row.items()])
+                extracted.append(
+                    {
+                        "id": row.get("chunk_id") or row.get("id") or f"neo4j_{idx}",
+                        "text": row_text,
+                        "score": None,
+                        "title": "Neo4j Graph",
+                        "source": "neo4j",
+                        "meta": row,
+                    }
+                )
+        elif isinstance(result, list):
+            for idx, item in enumerate(result):
+                if isinstance(item, dict):
+                    extracted.append(
+                        {
+                            "id": item.get("id") or f"item_{idx}",
+                            "text": item.get("text") or " | ".join([f"{k}: {v}" for k, v in item.items()]),
+                            "score": item.get("score"),
+                            "title": item.get("title") or item.get("source") or "",
+                            "source": item.get("source") or "unknown",
+                            "meta": item,
+                        }
+                    )
+
+        return extracted
 
     tool_results = []
     called_tools: list[str] = []
@@ -110,7 +199,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
 
         msg = resp.choices[0].message
 
-        # Si ya respondió normal, terminamos: recolectamos tool outputs
+        # Si ya respondió normal, terminamos con lo acumulado
         if not getattr(msg, "tool_calls", None):
             for m in messages:
                 if m.get("role") == "tool":
@@ -287,6 +376,7 @@ def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 @app.post("/api/ask")
+@observe(name="http-ask")
 def ask(req: AskRequest):
     import os, hashlib
 
@@ -296,6 +386,10 @@ def ask(req: AskRequest):
         return hashlib.sha256(key.encode()).hexdigest()[:10]
     
     t0 = time.time()
+    get_client().update_current_trace(
+        input=req.query,
+        metadata={"top_k": req.top_k, "show_debug": req.show_debug},
+    )
     out = llm_call_with_tools(
         system_prompt=QUERY_AGENT_SYSTEM,
         user_prompt=req.query,
@@ -438,7 +532,7 @@ def ask(req: AskRequest):
 
     t1 = time.time()
 
-    return {
+    response = {
         "query": req.query,
         "verdict": eval_out.verdict,
         "latency_ms": int((t1 - t0) * 1000),
@@ -447,6 +541,8 @@ def ask(req: AskRequest):
         "eval_json": eval_out.eval_json if req.show_debug else {},
         "chunks": retrieved if req.show_debug else [],
     }
+    get_client().update_current_trace(output=response)
+    return response
     
 @app.get("/api/debug/chroma")
 def debug_chroma(q: str = "Napoleón", k: int = 3):

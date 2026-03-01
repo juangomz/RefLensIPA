@@ -1,3 +1,15 @@
+Pasos a seguir para launchear
+
+Levantar Neo4j en Docker: 
 docker compose up -d
-PYTHONPATH=src uvicorn main_http.app:app --reload --port 8000
+Instalar/sincronizar dependencias de pyproject.toml:
+uv sync
+Ingestar chunks al vector store (Chroma):
 uv run python -m src.rag.cli.ingest --verbose --collection recursive
+Ingestar esos chunks a Neo4j (grafo):
+uv run python scripts/ingest_chunks_to_neo4j.py ingest --chunks_path data/processed/chunks.json --limit 10
+Abrir API:
+uv run env PYTHONPATH=src uvicorn main_http.app:app --reload --port 8000
+Ver Neo4j: http://localhost:7474
+user: neo4j
+password: password
