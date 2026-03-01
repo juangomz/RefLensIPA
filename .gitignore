@@ -6,22 +6,11 @@ dist/
 wheels/
 *.egg-info
 
+.env
+
 # Virtual environments
 .venv
 venv
-
-
-# Environment variables
-.env
-# Python venv
-venv/
-.venv/
-
-
-# Virtual env
-venv/
-.venv/
-
 
 # Evaluation outputs
 evaluations/results/

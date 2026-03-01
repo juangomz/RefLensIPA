@@ -681,16 +681,45 @@ function renderStructurePanel(data) {
         $("struct-relations").classList.remove("hidden");
     } else $("struct-relations").classList.add("hidden");
 
-    const chunks = data.chunks || [];
-    const total  = chunks.length || 1;
-    const neoN   = chunks.filter(c => (c.source||"").toLowerCase().includes("neo4j")).length;
-    const neoPct = Math.round(neoN/total*100);
+    const dist = data.source_distribution || null;
+    let neoN = 0;
+    let chromaN = 0;
+    let neoPct = 0;
+    let chromaPct = 0;
+
+    if (dist && dist.neo4j && dist.chroma && Number(dist.total) > 0) {
+        neoN = Number(dist.neo4j.count) || 0;
+        chromaN = Number(dist.chroma.count) || 0;
+        neoPct = Number(dist.neo4j.pct) || 0;
+        chromaPct = Number(dist.chroma.pct) || 0;
+    } else {
+        const chunks = data.chunks || [];
+        const total = chunks.length || 1;
+        neoN = chunks.filter(c => (c.source||"").toLowerCase().includes("neo4j")).length;
+        chromaN = total - neoN;
+        neoPct = Math.round(neoN / total * 100);
+        chromaPct = 100 - neoPct;
+
+        const called = Array.isArray(data.called_tools) ? data.called_tools : [];
+        const usedNeo = called.includes("graph_query");
+        const usedChroma = called.includes("vector_search");
+        if (chunks.length === 0 && (usedNeo || usedChroma)) {
+            const usedCount = (usedNeo ? 1 : 0) + (usedChroma ? 1 : 0);
+            if (usedCount > 0) {
+                neoPct = usedNeo ? Math.round(100 / usedCount) : 0;
+                chromaPct = usedChroma ? Math.round(100 / usedCount) : 0;
+                neoN = usedNeo ? 1 : 0;
+                chromaN = usedChroma ? 1 : 0;
+            }
+        }
+    }
+
     $("neo4j-bar").style.width  = neoPct+"%";
-    $("chroma-bar").style.width = (100-neoPct)+"%";
+    $("chroma-bar").style.width = chromaPct+"%";
     $("neo4j-pct").textContent  = neoPct+"%";
-    $("chroma-pct").textContent = (100-neoPct)+"%";
+    $("chroma-pct").textContent = chromaPct+"%";
     $("neo4j-count").textContent  = neoN;
-    $("chroma-count").textContent = total-neoN;
+    $("chroma-count").textContent = chromaN;
     $("struct-sources").classList.remove("hidden");
     panel.classList.remove("hidden");
 }
@@ -835,10 +864,16 @@ async function ask() {
         const res = await fetch("/api/ask", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ query, top_k: 5, show_debug: true })
+            body: JSON.stringify({ query, top_k: 10, show_debug: true })
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         lastData = await res.json();
+        console.log("[HTTP_DEBUG] /api/ask payload", {
+            called_tools: lastData.called_tools,
+            retrieved_total: lastData.retrieved_total,
+            source_distribution: lastData.source_distribution,
+            chunks: (lastData.chunks || []).map(c => c.source),
+        });
         render();
         setStatus("ready", "Análisis completado");
     } catch (e) {

@@ -163,7 +163,8 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
 
         return extracted
 
-    tool_results = []
+    tool_results: list[Any] = []
+    retrieved_context_accum: list[dict[str, Any]] = []
     called_tools: list[str] = []
     for _ in range(max_tool_rounds):
         try:
@@ -191,7 +192,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
                 return {
                     "assistant_text": "",
                     "tool_results": tool_results,
-                    "retrieved_context": [],
+                    "retrieved_context": retrieved_context_accum,
                     "called_tools": called_tools,
                     "error": "tool_calling_failed_from_model",
                 }
@@ -201,65 +202,20 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
 
         # Si ya respondió normal, terminamos con lo acumulado
         if not getattr(msg, "tool_calls", None):
-            for m in messages:
-                if m.get("role") == "tool":
-                    try:
-                        parsed = json.loads(m.get("content") or "null")
-                    except Exception:
-                        parsed = m.get("content")
-                    tool_results.append(parsed)
-
-            # Extraemos contextos tipo chunks desde las respuestas de tools
-            retrieved_context: list = []
-
-            for r in tool_results:
-                # Chroma: ya viene bien
-                if isinstance(r, dict) and "results" in r and isinstance(r["results"], list):
-                    retrieved_context.extend(r["results"])
-
-                # Neo4j: rows -> convertir a pseudo-chunks para UI
-                elif isinstance(r, dict) and "rows" in r and isinstance(r["rows"], list):
-                    for row in r["rows"]:
-                        if not isinstance(row, dict):
-                            continue
-
-                        # Entidad (tiene 'id' y 'type')
-                        if "id" in row and "type" in row:
-                            name = row.get("name") or row.get("canonical_name") or "Entity"
-                            retrieved_context.append({
-                                "id": f"neo4j:{row.get('id')}",
-                                "source": "neo4j",
-                                "title": name,
-                                "name": name,
-                                "score": None,
-                                "text": f"Entity({row.get('type')}): {name} | canonical={row.get('canonical_name')} | aliases={row.get('aliases', [])}",
-                                "meta": row,
-                            })
-
-                        # Relación (tiene 'rel' y 'target')
-                        elif "rel" in row and "target" in row:
-                            retrieved_context.append({
-                                "id": f"neo4j:rel:{row.get('target')}",
-                                "source": "neo4j",
-                                "title": "REL",
-                                "score": None,
-                                "text": f"REL -> {row.get('target')}",
-                                "meta": row,
-                            })
-
-                elif isinstance(r, list):
-                    retrieved_context.extend(r)
-
             # Debug: mostrar resumen de lo recuperado
             try:
-                print(f"[LLM_TOOLS] assistant returned; retrieved_context={len(retrieved_context)} items; tool_results={len(tool_results)}", flush=True)
+                print(
+                    f"[LLM_TOOLS] assistant returned; retrieved_context={len(retrieved_context_accum)} items; "
+                    f"tool_results={len(tool_results)}",
+                    flush=True,
+                )
             except Exception:
                 pass
 
             return {
                 "assistant_text": msg.content or "",
                 "tool_results": tool_results,
-                "retrieved_context": retrieved_context,
+                "retrieved_context": retrieved_context_accum,
                 "called_tools": called_tools,
             }
 
@@ -273,11 +229,16 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
         # Ejecutamos cada tool y devolvemos "tool" messages
         for tc in msg.tool_calls:
             name = tc.function.name
-            args_raw = tc.function.arguments or "{}"
+            args_raw = tc.function.arguments or {}
 
             try:
-                args = json.loads(args_raw)
-            except json.JSONDecodeError:
+                if isinstance(args_raw, str):
+                    args = json.loads(args_raw) if args_raw.strip() else {}
+                elif isinstance(args_raw, dict):
+                    args = args_raw
+                else:
+                    args = {"_raw": args_raw}
+            except Exception:
                 args = {"_raw": args_raw}
 
             tool = agent_tools.get(name)
@@ -289,6 +250,21 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
                     result = tool.execute(args)
                 except Exception as e:
                     result = {"error": f"Tool failed: {name}", "detail": str(e)}
+
+            try:
+                n_rows = len(result.get("rows")) if isinstance(result, dict) and isinstance(result.get("rows"), list) else None
+                n_results = len(result.get("results")) if isinstance(result, dict) and isinstance(result.get("results"), list) else None
+                print(
+                    f"[LLM_TOOL_RESULT] tool={name} rows={n_rows} results={n_results}",
+                    flush=True,
+                )
+            except Exception:
+                pass
+
+            tool_results.append(result)
+            extracted = _extract_retrieved_from_tool_result(result)
+            if extracted:
+                retrieved_context_accum.extend(extracted)
 
             messages.append({
                 "role": "tool",
@@ -304,7 +280,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
     return {
         "assistant_text": "",
         "tool_results": tool_results,
-        "retrieved_context": [],
+        "retrieved_context": retrieved_context_accum,
         "called_tools": called_tools,
         "error": "Stopped after max_tool_rounds without a final answer.",
     }
@@ -341,7 +317,7 @@ def load_some_chunks(path: str, k: int) -> List[Dict[str, Any]]:
 
 class AskRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    top_k: int = Field(5, ge=1, le=30)
+    top_k: int = Field(10, ge=1, le=30)
     show_debug: bool = True
 
 
@@ -353,6 +329,9 @@ class AskResponse(BaseModel):
     final_answer: str
     eval_json: Dict[str, Any]
     chunks: List[Dict[str, Any]]
+    source_distribution: Dict[str, Any]
+    called_tools: List[str]
+    retrieved_total: int
 
 
 app = FastAPI(title="RefLens HTTP Demo")
@@ -432,8 +411,13 @@ def ask(req: AskRequest):
         return ""
 
     entity_q = _entity_focus_query(req.query)
-    used_graph = isinstance(called_tools, list) and ("graph_query" in called_tools)
-    if entity_q and not used_graph:
+    has_neo4j_context = any(
+        isinstance(c, dict)
+        and isinstance(c.get("source"), str)
+        and "neo4j" in c.get("source", "").lower()
+        for c in (retrieved or [])
+    )
+    if entity_q and not has_neo4j_context:
         try:
             graph_tool = query_agent.tools.get("graph_query")
             if graph_tool:
@@ -449,6 +433,13 @@ def ask(req: AskRequest):
                     "params": {"q": entity_q},
                 })
                 rows = graph_out.get("rows") if isinstance(graph_out, dict) else []
+                try:
+                    print(
+                        f"[API_ASK_GRAPH_FALLBACK] entity_q={entity_q} rows={len(rows) if isinstance(rows, list) else 0}",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
                 if isinstance(rows, list):
                     for row in rows:
                         if not isinstance(row, dict):
@@ -492,28 +483,69 @@ def ask(req: AskRequest):
             })
         return out
     
-    def normalize_chunks(retrieved: list, top_k: int, max_chars: int = 600):
+    def canonical_source_label(source: Any, chunk_id: str, meta: dict[str, Any]) -> str:
+        s = str(source or "").strip().lower()
+        if "neo4j" in s or str(chunk_id).startswith("neo4j:"):
+            return "neo4j"
+        if "chroma" in s:
+            return "chroma"
+        # En vector_search de Chroma, 'source' suele venir como ruta de archivo (epub/pdf/txt/md/json...)
+        if s and ("/" in s or "\\" in s or "." in s):
+            return "chroma"
+        if meta.get("doc_id") or meta.get("collection"):
+            return "chroma"
+        return "unknown"
+
+    def normalize_chunks(retrieved: list, max_chars: int = 600):
         out = []
-        for i, c in enumerate((retrieved or [])[:top_k]):
+        for i, c in enumerate(retrieved or []):
             if not isinstance(c, dict):
                 continue
             meta = c.get("meta") or {}
             cid = c.get("chunk_id") or c.get("id") or meta.get("chunk_id") or f"c_{i}"
+            raw_source = c.get("source")
+            source = canonical_source_label(raw_source, str(cid), meta)
             out.append({
                 "id": cid,
                 "chunk_id": cid,
                 "text": (c.get("text") or "")[:max_chars],
-                "source": c.get("source"),
+                "source": source,
                 "score": c.get("score") if c.get("score") is not None else c.get("distance"),
                 "meta": {
                     **meta,
                     "doc_id": c.get("doc_id") or meta.get("doc_id"),
                     "chunk_id": cid,
+                    "raw_source": raw_source,
                 },
             })
         return out
-    
-    retrieved = normalize_chunks(retrieved, req.top_k, max_chars=600)
+
+    retrieved_all = normalize_chunks(retrieved, max_chars=600)
+    retrieved = retrieved_all[: req.top_k]
+
+    neo4j_count = sum(1 for c in retrieved_all if c.get("source") == "neo4j")
+    chroma_count = sum(1 for c in retrieved_all if c.get("source") == "chroma")
+    total_sources = len(retrieved_all)
+    other_count = max(total_sources - neo4j_count - chroma_count, 0)
+    neo4j_pct = round((neo4j_count / total_sources) * 100) if total_sources else 0
+    chroma_pct = round((chroma_count / total_sources) * 100) if total_sources else 0
+    other_pct = max(0, 100 - neo4j_pct - chroma_pct) if total_sources else 0
+
+    source_distribution = {
+        "total": total_sources,
+        "neo4j": {"count": neo4j_count, "pct": neo4j_pct},
+        "chroma": {"count": chroma_count, "pct": chroma_pct},
+        "other": {"count": other_count, "pct": other_pct},
+    }
+
+    try:
+        print(
+            f"[API_ASK_DEBUG] called_tools={called_tools} total_retrieved={total_sources} "
+            f"dist={source_distribution} topk_sources={[c.get('source') for c in retrieved]}",
+            flush=True,
+        )
+    except Exception:
+        pass
 
     # Generar borrador con AnswerAgent
     draft = answer_agent.run(
@@ -540,13 +572,16 @@ def ask(req: AskRequest):
         "final_answer": eval_out.answer,
         "eval_json": eval_out.eval_json if req.show_debug else {},
         "chunks": retrieved if req.show_debug else [],
+        "source_distribution": source_distribution,
+        "called_tools": called_tools if isinstance(called_tools, list) else [],
+        "retrieved_total": total_sources,
     }
     get_client().update_current_trace(output=response)
     return response
     
 @app.get("/api/debug/chroma")
 def debug_chroma(q: str = "Napoleón", k: int = 3):
-    tool = next(t for t in query_agent.tools if t.name == "vector_search")
+    tool = query_agent.tools["vector_search"]
     return tool.execute({"query": q, "k": k, "where": None})
 
 @app.get("/api/test-tools")

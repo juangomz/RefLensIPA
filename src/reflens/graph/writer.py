@@ -33,6 +33,7 @@ class GraphWriter:
                 SET c.text = $text,
                     c.source = $source,
                     c.timestamp = $timestamp,
+                    c.topic = $topic,
                     c.embedding = $embedding,
                     c.updated_at = $updated_at
                 """,
@@ -41,6 +42,7 @@ class GraphWriter:
                 text=chunk["text"],
                 source=chunk["source"],
                 timestamp=chunk["timestamp"],
+                topic=chunk.get("topic"),
                 embedding=chunk.get("embedding"),  # <---
                 updated_at=_now_ms(),
             )
