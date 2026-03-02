@@ -17,7 +17,7 @@ from src.rag.observability.langfuse_client import configure_langfuse
 # Importa tus agentes (ajusta el path según dónde los tengas)
 from src.reflens.answer.answer_agent import AnswerAgent
 from src.reflens.query.query_agent import QueryAgent, QUERY_AGENT_SYSTEM
-from src.reflens.eval_agent import EvalAgent
+from src.reflens.eval_agent import EvalAgent, select_chunks_for_eval
 
 import json
 
@@ -33,12 +33,15 @@ if (
 GROQ_API_ENDPOINT = os.getenv("GROQ_API_ENDPOINT")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+ANSWER_MODEL = os.getenv("ANSWER_MODEL", GROQ_MODEL)
+JUDGE_MODEL = os.getenv("JUDGE_MODEL", GROQ_MODEL)
+QUERY_MODEL = os.getenv("QUERY_MODEL", ANSWER_MODEL)
 
 client = OpenAI(api_key=GROQ_API_KEY, base_url=GROQ_API_ENDPOINT)
 
-def llm_call(system_prompt: str, user_prompt: str) -> str:
+def _llm_call_with_model(model_name: str, system_prompt: str, user_prompt: str) -> str:
     r = client.chat.completions.create(
-        model=GROQ_MODEL,
+        model=model_name,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -46,6 +49,14 @@ def llm_call(system_prompt: str, user_prompt: str) -> str:
         temperature=0,
     )
     return r.choices[0].message.content
+
+
+def llm_call_answer(system_prompt: str, user_prompt: str) -> str:
+    return _llm_call_with_model(ANSWER_MODEL, system_prompt, user_prompt)
+
+
+def llm_call_judge(system_prompt: str, user_prompt: str) -> str:
+    return _llm_call_with_model(JUDGE_MODEL, system_prompt, user_prompt)
 
 def tool_to_openai_schema(t) -> dict:
     params = getattr(t, "parameters", None)
@@ -169,7 +180,7 @@ def llm_call_with_tools(system_prompt: str, user_prompt: str, agent_tools: dict,
     for _ in range(max_tool_rounds):
         try:
             resp = client.chat.completions.create(
-                model=GROQ_MODEL,
+                model=QUERY_MODEL,
                 messages=messages,
                 tools=tool_schemas,
                 tool_choice="auto",
@@ -317,7 +328,7 @@ def load_some_chunks(path: str, k: int) -> List[Dict[str, Any]]:
 
 class AskRequest(BaseModel):
     query: str = Field(..., min_length=1)
-    top_k: int = Field(10, ge=1, le=30)
+    top_k: int = Field(4, ge=1, le=30)  # límite aplicado solo a chunks de Chroma
     show_debug: bool = True
 
 
@@ -342,12 +353,12 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Create agents once
-answer_agent = AnswerAgent(llm_call)
-eval_agent = EvalAgent(llm_call)
+answer_agent = AnswerAgent(llm_call_answer)
+eval_agent = EvalAgent(llm_call_judge)
 query_agent = QueryAgent(
     chroma_persist_dir=os.getenv("CHROMA_PERSIST_DIRECTORY", "chroma_db"),
     chroma_collection=os.getenv("CHROMA_COLLECTION", "kb_chunks"),
-    model=GROQ_MODEL,
+    model=QUERY_MODEL,
 )
 
 @app.get("/")
@@ -521,7 +532,21 @@ def ask(req: AskRequest):
         return out
 
     retrieved_all = normalize_chunks(retrieved, max_chars=600)
-    retrieved = retrieved_all[: req.top_k]
+
+    def limit_only_chroma(chunks: list[dict[str, Any]], chroma_limit: int) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        chroma_count = 0
+        for c in chunks:
+            src = c.get("source")
+            if src == "chroma":
+                if chroma_count >= chroma_limit:
+                    continue
+                chroma_count += 1
+            out.append(c)
+        return out
+
+    # Limita solo Chroma; Neo4j (y otros) pasan sin tope.
+    retrieved = limit_only_chroma(retrieved_all, req.top_k)
 
     neo4j_count = sum(1 for c in retrieved_all if c.get("source") == "neo4j")
     chroma_count = sum(1 for c in retrieved_all if c.get("source") == "chroma")
@@ -546,6 +571,9 @@ def ask(req: AskRequest):
         )
     except Exception:
         pass
+
+    # Usar exactamente el mismo subconjunto para answer y eval
+    retrieved = select_chunks_for_eval(retrieved)  # type: ignore[assignment]
 
     # Generar borrador con AnswerAgent
     draft = answer_agent.run(
