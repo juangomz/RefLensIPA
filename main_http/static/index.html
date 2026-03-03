@@ -385,9 +385,14 @@
                     <div class="mono text-[8px] text-slate-600 uppercase mt-0.5">Aristas</div>
                 </div>
                 <div class="graph-stat">
-                    <div id="gs-avg" class="mono text-sm font-bold text-amber-400">—</div>
-                    <div class="mono text-[8px] text-slate-600 uppercase mt-0.5">Score Avg</div>
+                    <div id="gs-top-rrf" class="mono text-sm font-bold text-amber-400">—</div>
+                    <div class="mono text-[8px] text-slate-600 uppercase mt-0.5">Top RRF</div>
                 </div>
+            </div>
+
+            <div class="mt-2 rounded-xl border border-white/[0.06] bg-white/[0.02] p-2">
+                <p class="mono text-[8px] text-slate-500 uppercase tracking-widest mb-1">RRF Ranking</p>
+                <div id="rrf-ranking" class="space-y-1"></div>
             </div>
 
             <!-- Chunks -->
@@ -525,7 +530,7 @@ function attachEvents(cyInst, containerEl) {
         const rect = containerEl.getBoundingClientRect();
         $("tt-title").textContent = d.label || "Nodo";
         $("tt-text").textContent  = d.fullText || "";
-        $("tt-score").textContent = d.score != null ? `Score: ${(d.score*100).toFixed(1)}%` : "";
+        $("tt-score").textContent = d.score != null ? `RRF: ${Number(d.score).toFixed(5)}` : "";
         const isNeo = (d.source||"").toLowerCase().includes("neo4j");
         const s = isNeo
             ? "color:#6ee7b7;background:rgba(16,185,129,0.1);border-color:rgba(16,185,129,0.3)"
@@ -569,10 +574,11 @@ function initGraph(chunks) {
     attachEvents(cy, container);
     $("gs-nodes").textContent = nodes.length;
     $("gs-edges").textContent = edges.length;
-    const scores = chunks.map(c => c.score).filter(s => s != null);
-    $("gs-avg").textContent   = scores.length
-        ? (scores.reduce((a,b)=>a+b,0)/scores.length*100).toFixed(0)+"%"
-        : "—";
+    const scores = chunks
+        .map(c => (typeof c.score === "number" ? c.score : null))
+        .filter(s => s != null);
+    const top = scores.length ? Math.max(...scores) : null;
+    $("gs-top-rrf").textContent = top != null ? Number(top).toFixed(5) : "—";
 }
 
 window.resetZoom    = () => { if (cy)   cy.fit(undefined, 16); };
@@ -764,6 +770,28 @@ function renderQaMetrics(data) {
   box.classList.remove("hidden");
 }
 
+function renderRrfRanking(chunks) {
+  const box = $("rrf-ranking");
+  if (!box) return;
+
+  const ranked = (chunks || [])
+    .filter(c => typeof c?.score === "number")
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 10);
+
+  if (!ranked.length) {
+    box.innerHTML = `<div class="mono text-[9px] text-slate-600">Sin scores RRF</div>`;
+    return;
+  }
+
+  box.innerHTML = ranked.map((c, idx) => `
+    <div class="flex items-center justify-between mono text-[9px]">
+      <span class="text-slate-400">#${idx + 1} ${escHtml(String(c.id || c.chunk_id || "chunk"))}</span>
+      <span class="text-amber-400">${Number(c.score).toFixed(5)}</span>
+    </div>
+  `).join("");
+}
+
 // ══════════════════════════════════
 //  STATUS
 // ══════════════════════════════════
@@ -784,6 +812,8 @@ function render() {
     if (!lastData) {
         out.innerHTML = `<div class="flex flex-col items-center justify-center py-16 text-slate-600"><i data-lucide="book-open" class="w-10 h-10 mb-3 opacity-40"></i><p class="text-sm italic opacity-60">Escribe una pregunta sobre el libro...</p></div>`;
         $("chunks").innerHTML = $("badge-container").innerHTML = "";
+        if ($("rrf-ranking")) $("rrf-ranking").innerHTML = "";
+        if ($("gs-top-rrf")) $("gs-top-rrf").textContent = "—";
         $("struct-panel").classList.add("hidden");
         $("query-info").classList.add("hidden");
         lucide.createIcons(); return;
@@ -812,6 +842,7 @@ function render() {
     // Chunks
     const chunks = lastData.chunks || [];
     lastChunks   = chunks;
+    if (!chunks.length && $("gs-top-rrf")) $("gs-top-rrf").textContent = "—";
     $("chunks").innerHTML = chunks.map((c, i) => {
         const isNeo = (c.source||"").toLowerCase().includes("neo4j");
         const score = typeof c.score === "number" ? c.score : null;
@@ -823,14 +854,14 @@ function render() {
                 <span class="mono text-[8px] font-bold text-slate-600">#${c.id?String(c.id).slice(0,8):i}</span>
                 <div class="flex items-center gap-1.5">
                     <span class="mono text-[8px] font-bold ${isNeo?"text-emerald-400":"text-indigo-400"}">${isNeo?"Neo4j":"Chroma"}</span>
-                    ${score!=null?`<span class="mono text-[8px] text-slate-500">${(score*100).toFixed(0)}%</span>`:""}
+                    ${score!=null?`<span class="mono text-[8px] text-slate-500">RRF ${Number(score).toFixed(5)}</span>`:""}
                 </div>
             </div>
             <p class="text-[10px] font-semibold text-slate-200 mb-1 truncate" title="${escHtml(label)}">${escHtml(label)}</p>
             <p class="text-[10px] text-slate-500 leading-relaxed line-clamp-2">${escHtml(c.text||"Sin contenido")}</p>
-            ${score!=null?`<div class="w-full h-0.5 bg-slate-800 rounded-full mt-2 overflow-hidden"><div class="h-full rounded-full ${isNeo?"bg-emerald-500":"bg-indigo-500"}" style="width:${(score*100).toFixed(0)}%"></div></div>`:""}
         </div>`;
     }).join("");
+    renderRrfRanking(chunks);
 
     // Sidebar info
     const q = lastData.query || $("query").value.trim();

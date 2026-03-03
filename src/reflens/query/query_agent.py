@@ -9,7 +9,7 @@ from rag.models.embedding_model import EmbeddingModel
 QUERY_AGENT_SYSTEM = """You are QueryAgent for a hybrid RAG + Knowledge Graph system.
 
 Tools:
-- vector_search({query, k, where}) -> {results:[{chunk_id, doc_id, source, timestamp, text, distance, meta}], k}
+- vector_search({query, k, where}) -> {results:[{chunk_id, doc_id, source, timestamp, text, score, distance, meta, retrieval_mode}], k}
 - graph_query({cypher, params}) -> {rows:[...]}
 
 Graph schema (authoritative):

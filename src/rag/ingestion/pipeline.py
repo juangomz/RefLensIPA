@@ -106,6 +106,11 @@ class IngestionPipeline:
             console.print(f"[green]✓ Saved to {processed_dir}[/]\n")
             chunks_file = processed_dir / "chunks.json"
     
+            # NOTE:
+            # Graph ingestion was intentionally disabled for demo runs because it is
+            # computationally heavy and significantly increases ingestion time/cost.
+            # For production or full evaluations, run Neo4j ingestion separately
+            # with scripts/ingest_chunks_to_neo4j.py.
             # console.print("[bold]Step 2.5: Running Graph Agent extraction (Internal Call)...[/]")
             # try:
             #     # Call the function directly in the same process

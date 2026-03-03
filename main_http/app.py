@@ -17,7 +17,7 @@ from src.rag.observability.langfuse_client import configure_langfuse
 # Importa tus agentes (ajusta el path según dónde los tengas)
 from src.reflens.answer.answer_agent import AnswerAgent
 from src.reflens.query.query_agent import QueryAgent, QUERY_AGENT_SYSTEM
-from src.reflens.eval_agent import EvalAgent, select_chunks_for_eval
+from src.reflens.eval.eval_agent import EvalAgent, select_chunks_for_eval
 
 import json
 
